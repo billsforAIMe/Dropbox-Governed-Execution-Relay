@@ -101,4 +101,28 @@ class R0Tests(unittest.TestCase):
     def test_health_sequence_monotonic(self):
         self.r.heartbeat(); a=json.loads((self.root/"Control"/"health.json").read_text())["sequence"]; self.r.heartbeat(); b=json.loads((self.root/"Control"/"health.json").read_text())["sequence"]; self.assertGreater(b,a)
 
+    def test_state_root_symlink_rejected_before_resolve(self):
+        target=Path(self.t.name)/"real-state"; target.mkdir(); link=Path(self.t.name)/"state-link"; link.symlink_to(target, target_is_directory=True)
+        with self.assertRaisesRegex(RuntimeError,"UNSAFE_RELAY_PATH"): relay.Relay(Path(self.t.name)/"transport2",link,sleep=lambda _:None)
+    def test_launch_reservation_persisted_before_child_identity(self):
+        rid=self.rid(40); ad=self.state/"fake-attempt"; tree=ad/"gep-tree"; (tree/"scripts").mkdir(parents=True); (tree/"scripts"/"governed_exec.py").write_text("# fake\n")
+        cur={"request_id":rid,"attempts":0,"phase":"CHM_STARTED"}; relay.save_state(self.state,rid,cur)
+        fake=mock.Mock(pid=4321)
+        with mock.patch.object(relay,"reconstruct_gep",return_value=tree), mock.patch.object(relay,"provision_gep"), mock.patch.object(relay.subprocess,"Popen",return_value=fake) as popen, mock.patch.object(relay,"process_identity",side_effect=SystemExit("simulated relay crash after Popen")):
+            with self.assertRaises(SystemExit): relay.start_gep(self.state,rid,cur)
+        saved=relay.read_state(self.state,rid)
+        self.assertEqual("GEP_STARTING",saved["phase"]); self.assertEqual(1,saved["attempts"]); self.assertTrue(saved["gep_target"].endswith("/scripts/governed_exec.py")); popen.assert_called_once()
+    def test_starting_crash_window_adopts_without_relaunch(self):
+        rid=self.rid(41); d=publish(self.root,rid); ad=self.state/"attempts"/rid/"attempt-1"; target=ad/"gep-tree"/"scripts"/"governed_exec.py"; target.parent.mkdir(parents=True); target.write_text("# fake\n")
+        cur={"request_id":rid,"attempts":1,"phase":"GEP_STARTING","attempt_dir":str(ad),"gep_target":str(target),"chm_slot":relay.CHM_SLOT}; relay.save_state(self.state,rid,cur)
+        with mock.patch.object(relay,"qualified",return_value=True), mock.patch.object(relay,"read_gep_terminal",return_value=(None,"","")), mock.patch.object(relay,"find_attempt_process",return_value=(4321,"stable-ident")), mock.patch.object(relay,"start_gep") as start:
+            self.r.process_one(d); start.assert_not_called()
+        saved=relay.read_state(self.state,rid); self.assertEqual("GEP_RUNNING",saved["phase"]); self.assertEqual(1,saved["attempts"]); self.assertEqual(4321,saved["gep_pid"]); self.assertEqual("stable-ident",saved["gep_process_identity"])
+    def test_second_starting_reservation_cannot_launch_third_attempt(self):
+        rid=self.rid(42); d=publish(self.root,rid); ad=self.state/"attempts"/rid/"attempt-2"; target=ad/"gep-tree"/"scripts"/"governed_exec.py"; target.parent.mkdir(parents=True); target.write_text("# fake\n")
+        cur={"request_id":rid,"attempts":2,"phase":"GEP_STARTING","attempt_dir":str(ad),"gep_target":str(target),"chm_slot":relay.CHM_SLOT}; relay.save_state(self.state,rid,cur)
+        with mock.patch.object(relay,"qualified",return_value=True), mock.patch.object(relay,"read_gep_terminal",return_value=(None,"","")), mock.patch.object(relay,"find_attempt_process",return_value=None), mock.patch.object(relay,"start_gep") as start, mock.patch.object(self.r,"_finish_chm",return_value=True):
+            self.r.process_one(d); start.assert_not_called()
+        result=json.loads((self.root/"Runs"/rid/"result.json").read_text()); self.assertEqual("RERUN_LIMIT_EXCEEDED",result["classification"]); self.assertEqual(2,result["attempts"])
+
 if __name__=="__main__": unittest.main(verbosity=2)

@@ -196,6 +196,33 @@ def is_same_live_process(pid: Any, identity: Any) -> bool:
         return False
 
 
+def find_attempt_process(target: Any) -> tuple[int, str] | None:
+    if not isinstance(target, str) or not target:
+        return None
+    try:
+        physical = str(Path(target).resolve(strict=True))
+    except Exception:
+        return None
+    cp = subprocess.run(["/bin/ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=5)
+    if cp.returncode:
+        return None
+    matches: list[tuple[int, str]] = []
+    for line in cp.stdout.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) != 2 or physical not in parts[1]:
+            continue
+        try:
+            pid = int(parts[0])
+        except ValueError:
+            continue
+        ident = process_identity(pid)
+        if ident:
+            matches.append((pid, ident))
+    if len(matches) > 1:
+        raise RuntimeError("MULTIPLE_GEP_ATTEMPT_PROCESSES")
+    return matches[0] if matches else None
+
+
 def reconstruct_gep(attempt_dir: Path) -> Path:
     tree = attempt_dir / "gep-tree"
     if tree.exists(): shutil.rmtree(tree)
@@ -242,6 +269,9 @@ def start_gep(state_root: Path, request_id: str, current: dict[str, Any]) -> dic
     env = os.environ.copy(); env["PYRUNWAY_STRICT"] = "1"; env["PYTHONDONTWRITEBYTECODE"] = "1"
     target = (tree / "scripts" / "governed_exec.py").resolve(strict=True)
     cmd = [str(PYRUNWAY), str(target), "self-check", QUALIFIED_PROJECT]
+    current.update({"attempts": attempt, "phase": "GEP_STARTING", "attempt_dir": str(ad), "gep_target": str(target), "gep_launch_reserved_utc": utc()})
+    current.pop("gep_pid", None); current.pop("gep_process_identity", None)
+    save_state(state_root, request_id, current)
     try:
         proc = subprocess.Popen(cmd, cwd=tree, env=env, stdout=out, stderr=err, start_new_session=True)
     finally:
@@ -255,7 +285,7 @@ def start_gep(state_root: Path, request_id: str, current: dict[str, Any]) -> dic
         try: proc.terminate()
         except Exception: pass
         raise RuntimeError("GEP_CHILD_IDENTITY_UNAVAILABLE")
-    current.update({"attempts": attempt, "phase": "GEP_RUNNING", "gep_pid": proc.pid, "gep_process_identity": ident, "attempt_dir": str(ad), "gep_started_utc": utc()})
+    current.update({"phase": "GEP_RUNNING", "gep_pid": proc.pid, "gep_process_identity": ident, "gep_started_utc": utc()})
     save_state(state_root, request_id, current)
     return current
 
@@ -286,6 +316,7 @@ def safe_output_dir(parent: Path, request_id: str) -> Path:
 class Relay:
     def __init__(self, root: Path, state_root: Path = DEFAULT_STATE, *, sleep=time.sleep):
         if root.is_symlink(): raise RuntimeError("UNSAFE_TRANSPORT_ROOT")
+        if state_root.is_symlink(): raise RuntimeError("UNSAFE_RELAY_PATH")
         self.root = root.resolve(); self.state = state_root.resolve(); self.sleep = sleep
         self.ingress, self.runs, self.control = self.root / "Ingress", self.root / "Runs", self.root / "Control"
         self.sequence_file = self.state / "health-sequence"
@@ -383,6 +414,31 @@ class Relay:
                 self.status(rid, "CHM_STARTED", chm_slot=slot, attempts=current.get("attempts", 0))
             except Exception as exc:
                 self.status(rid, "DEGRADED_CHM_UNAVAILABLE", detail=str(exc)); return False
+        if current.get("phase") == "GEP_STARTING":
+            value, stdout, stderr = read_gep_terminal(current)
+            if value is not None and value.get("operation_id") == QUALIFIED_OPERATION and value.get("project_id") == QUALIFIED_PROJECT and isinstance(value.get("run_id"), str):
+                outcome = "SUCCESS" if value.get("overall_outcome") == "SUCCESS" else "FAILED"
+                self.result(rid, outcome, "GEP_TERMINAL", gep_result=value, stdout=stdout, stderr=stderr, attempts=current.get("attempts"), chm_slot=current.get("chm_slot"))
+                current["phase"] = "RESULT_PUBLISHED"; save_state(self.state, rid, current); self._finish_chm(rid, current); return True
+            adopted = None
+            for _ in range(20):
+                adopted = find_attempt_process(current.get("gep_target"))
+                if adopted: break
+                self.sleep(0.05)
+            if adopted:
+                pid, ident = adopted
+                current.update({"phase": "GEP_RUNNING", "gep_pid": pid, "gep_process_identity": ident, "gep_adopted_utc": utc()})
+                save_state(self.state, rid, current)
+                self.status(rid, "GEP_RUNNING", attempts=current.get("attempts"), chm_slot=current.get("chm_slot")); return True
+            value, stdout, stderr = read_gep_terminal(current)
+            if value is not None and value.get("operation_id") == QUALIFIED_OPERATION and value.get("project_id") == QUALIFIED_PROJECT and isinstance(value.get("run_id"), str):
+                outcome = "SUCCESS" if value.get("overall_outcome") == "SUCCESS" else "FAILED"
+                self.result(rid, outcome, "GEP_TERMINAL", gep_result=value, stdout=stdout, stderr=stderr, attempts=current.get("attempts"), chm_slot=current.get("chm_slot"))
+                current["phase"] = "RESULT_PUBLISHED"; save_state(self.state, rid, current); self._finish_chm(rid, current); return True
+            current["phase"] = "CHM_STARTED"; current.pop("gep_pid", None); current.pop("gep_process_identity", None); save_state(self.state, rid, current)
+            if int(current.get("attempts", 0)) >= MAX_ATTEMPTS:
+                self.result(rid, "BLOCKED", "RERUN_LIMIT_EXCEEDED", detail="GEP_STARTING reservation consumed without live or terminal child", attempts=current.get("attempts"), chm_slot=current.get("chm_slot")); current["phase"] = "RESULT_PUBLISHED"; save_state(self.state, rid, current); self._finish_chm(rid, current); return True
+            self.status(rid, "GEP_INVOCATION_RETRY", detail="GEP_STARTING reservation consumed without live or terminal child", attempts=current.get("attempts"), chm_slot=current.get("chm_slot")); return True
         if current.get("phase") == "GEP_RUNNING":
             value, stdout, stderr = read_gep_terminal(current)
             if value is not None and value.get("operation_id") == QUALIFIED_OPERATION and value.get("project_id") == QUALIFIED_PROJECT and isinstance(value.get("run_id"), str):
@@ -398,6 +454,11 @@ class Relay:
             try:
                 current = start_gep(self.state, rid, current); self.status(rid, "GEP_RUNNING", attempts=current.get("attempts"), chm_slot=current.get("chm_slot")); return True
             except Exception as exc:
+                fresh = read_state(self.state, rid)
+                if fresh.get("phase") == "GEP_STARTING":
+                    current = fresh
+                    self.status(rid, "GEP_START_RECOVERY_PENDING", detail=str(exc), attempts=current.get("attempts"), chm_slot=current.get("chm_slot")); return True
+                current = fresh
                 current["attempts"] = int(current.get("attempts", 0)) + 1; current["phase"] = "CHM_STARTED"; save_state(self.state, rid, current)
                 if current["attempts"] >= MAX_ATTEMPTS:
                     self.result(rid, "BLOCKED", "RERUN_LIMIT_EXCEEDED", detail=str(exc), attempts=current["attempts"], chm_slot=current.get("chm_slot")); current["phase"] = "RESULT_PUBLISHED"; save_state(self.state, rid, current); self._finish_chm(rid, current)
