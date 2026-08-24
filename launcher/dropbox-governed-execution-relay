@@ -1,0 +1,12 @@
+#!/bin/zsh
+set -euo pipefail
+STATE='/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay'
+IDENTITY="$STATE/delivered-identity.json"
+[[ -f "$IDENTITY" && ! -L "$IDENTITY" ]] || { echo 'DGER_DELIVERED_IDENTITY_MISSING' >&2; exit 70; }
+SHA=$(/usr/bin/plutil -extract candidate_sha raw -o - "$IDENTITY" 2>/dev/null || true)
+RUNTIME=$(/usr/bin/plutil -extract runtime_root raw -o - "$IDENTITY" 2>/dev/null || true)
+[[ ${#SHA} -eq 40 && "$SHA" != *[^0-9a-f]* && -d "$RUNTIME" && ! -L "$RUNTIME" ]] || { echo 'DGER_DELIVERED_IDENTITY_INVALID' >&2; exit 70; }
+BARE='/Users/brettmacpro/ChatGPT/Git/Tools/Dropbox Governed Execution Relay.git'
+MAIN=$(/usr/bin/git --git-dir="$BARE" rev-parse refs/heads/main 2>/dev/null || true)
+[[ "$MAIN" == "$SHA" ]] || { echo 'DGER_MAIN_IDENTITY_MISMATCH' >&2; exit 70; }
+exec env PYRUNWAY_STRICT=1 PYTHONDONTWRITEBYTECODE=1 /usr/local/bin/pyrunway --standalone "$RUNTIME/scripts/dger.py"
