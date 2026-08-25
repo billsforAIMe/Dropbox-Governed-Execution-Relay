@@ -1,5 +1,6 @@
 #!/bin/zsh
 set -euo pipefail
+export PATH='/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin'
 STATE='/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay'
 IDENTITY="$STATE/delivered-identity.json"
 [[ -f "$IDENTITY" && ! -L "$IDENTITY" ]] || { echo 'DGER_DELIVERED_IDENTITY_MISSING' >&2; exit 70; }
