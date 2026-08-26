@@ -1,0 +1,72 @@
+{
+  "adapter": {
+    "executable": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay/god/adoption/dger-god-adapter",
+    "sha256": "fe1267d7c9b99c16882390cacc6c7cf7f231a5d065d349f8ac76f962dd996c66"
+  },
+  "backup_root": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay/god/deploy_backups",
+  "deployment_root": "/Users/brettmacpro",
+  "evidence_root": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay/god/deploy_evidence",
+  "limits": {
+    "max_file_bytes": 2000000,
+    "max_files": 32,
+    "max_total_bytes": 10000000
+  },
+  "project_id": "dger-r0",
+  "repository_id": "dger",
+  "runtime_accounting": {
+    "leave_stopped_ids": [],
+    "runtime_ids": [
+      "dger.launchagent"
+    ],
+    "stop_required_ids": [
+      "dger.launchagent"
+    ],
+    "writer_ids": [
+      "dger.gep-child"
+    ]
+  },
+  "schema_version": 1,
+  "state_root": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay/god",
+  "surface": [
+    {
+      "mode": "0644",
+      "runtime_path": "ChatGPT/State/Tools/Dropbox Governed Execution Relay/runtime/current/.python-version",
+      "source_path": ".python-version"
+    },
+    {
+      "mode": "0644",
+      "runtime_path": "ChatGPT/State/Tools/Dropbox Governed Execution Relay/runtime/current/pyproject.toml",
+      "source_path": "pyproject.toml"
+    },
+    {
+      "mode": "0644",
+      "runtime_path": "ChatGPT/State/Tools/Dropbox Governed Execution Relay/runtime/current/uv.lock",
+      "source_path": "uv.lock"
+    },
+    {
+      "mode": "0644",
+      "runtime_path": "ChatGPT/State/Tools/Dropbox Governed Execution Relay/runtime/current/scripts/dger.py",
+      "source_path": "scripts/dger.py"
+    },
+    {
+      "mode": "0644",
+      "runtime_path": "ChatGPT/State/Tools/Dropbox Governed Execution Relay/runtime/current/src/dger/__init__.py",
+      "source_path": "src/dger/__init__.py"
+    },
+    {
+      "mode": "0644",
+      "runtime_path": "ChatGPT/State/Tools/Dropbox Governed Execution Relay/runtime/current/src/dger/relay.py",
+      "source_path": "src/dger/relay.py"
+    },
+    {
+      "mode": "0755",
+      "runtime_path": "ChatGPT/State/Tools/Dropbox Governed Execution Relay/runtime/current/launcher/dropbox-governed-execution-relay",
+      "source_path": "launcher/dropbox-governed-execution-relay"
+    },
+    {
+      "mode": "0644",
+      "runtime_path": "Library/LaunchAgents/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist",
+      "source_path": "launchagent/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist"
+    }
+  ]
+}
