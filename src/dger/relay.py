@@ -16,11 +16,12 @@ from typing import Any
 PROTOCOL = "DGER_R0_V1"
 REQUEST_SCHEMA = "DGER_R0_REQUEST_V1"
 READY_SCHEMA = "DGER_R0_READY_V1"
-QUALIFIED_GEP_SHA = "fe088a93eee537dbe7f8857aec85303f151cbb63"
-QUALIFIED_GEP_TREE = "a31ebcfae3b645a8a9bc47f46daddfbf7c10f545"
+QUALIFIED_GEP_SHA = "aa755d8941f7b0d46343c7e6b0d36c5f4cc40c15"
+QUALIFIED_GEP_TREE = "26ebad2517b29eabf47110144e8534a07b62f015"
 QUALIFIED_OPERATION = "platform.self_check"
 QUALIFIED_PROJECT = "ai-me"
 GEP_BARE = Path("/Users/brettmacpro/ChatGPT/Git/Tools/Governed Execution Platform.git")
+DGER_BARE = Path("/Users/brettmacpro/ChatGPT/Git/Tools/Dropbox Governed Execution Relay.git")
 PYRUNWAY = Path("/usr/local/bin/pyrunway")
 CHM = Path("/usr/local/bin/handoff-manager")
 CHM_SLOT = "Handoff100"
@@ -91,6 +92,20 @@ def git_main_identity() -> tuple[str, str]:
     sha = g("rev-parse", "refs/heads/main")
     return sha, g("rev-parse", f"{sha}^{{tree}}")
 
+
+def dger_authority_identity() -> tuple[str, str]:
+    def g(*args: str) -> str:
+        cp = subprocess.run(["/usr/bin/git", f"--git-dir={DGER_BARE}", *args], capture_output=True, text=True, timeout=15)
+        if cp.returncode:
+            raise RuntimeError("DGER_AUTHORITY_UNAVAILABLE")
+        return cp.stdout.strip()
+    commit = g("rev-parse", "refs/heads/main")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise RuntimeError("DGER_AUTHORITY_INVALID")
+    tree = g("rev-parse", f"{commit}^{{tree}}")
+    if not re.fullmatch(r"[0-9a-f]{40}", tree):
+        raise RuntimeError("DGER_AUTHORITY_TREE_INVALID")
+    return commit, tree
 
 def qualified() -> bool:
     try:
@@ -332,7 +347,8 @@ class Relay:
         seq += 1
         tmp = self.sequence_file.with_name(f".{self.sequence_file.name}.{os.getpid()}.tmp")
         tmp.write_text(str(seq)); os.replace(tmp, self.sequence_file)
-        atomic_json(self.control / "health.json", {"schema_version": PROTOCOL, "sequence": seq, "updated_at_utc": utc(), "relay_state": state, "protocol_version": PROTOCOL, "expected_interval_seconds": EXPECTED_INTERVAL_SECONDS, "qualified_gep_operation": QUALIFIED_OPERATION, "qualified_gep_commit": QUALIFIED_GEP_SHA}, 0o644)
+        dger_sha, dger_tree = dger_authority_identity()
+        atomic_json(self.control / "health.json", {"schema_version": PROTOCOL, "sequence": seq, "updated_at_utc": utc(), "relay_state": state, "protocol_version": PROTOCOL, "expected_interval_seconds": EXPECTED_INTERVAL_SECONDS, "qualified_gep_operation": QUALIFIED_OPERATION, "qualified_gep_commit": QUALIFIED_GEP_SHA, "dger_commit": dger_sha, "dger_tree": dger_tree}, 0o644)
 
     def status(self, rid: str, state: str, **extra: Any) -> None:
         atomic_json(safe_output_dir(self.runs, rid) / "status.json", {"schema_version": PROTOCOL, "request_id": rid, "state": state, "updated_at_utc": utc(), **extra}, 0o644)
