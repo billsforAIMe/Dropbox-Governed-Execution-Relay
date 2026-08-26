@@ -1,0 +1,9 @@
+#!/bin/zsh
+set -euo pipefail
+export PATH='/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin'
+IMPL='/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay/god/adoption/dger_god_adapter.py'
+EXPECTED='83daf4be02c2a5afe6bb06e142872c63c42a80c220cde2a6572eec876b767384'
+[[ -f "$IMPL" && ! -L "$IMPL" ]] || exit 70
+ACTUAL=$(/usr/bin/shasum -a 256 "$IMPL" | /usr/bin/awk '{print $1}')
+[[ "$ACTUAL" == "$EXPECTED" ]] || exit 70
+exec /usr/bin/env PYRUNWAY_STRICT=1 PYTHONDONTWRITEBYTECODE=1 /usr/local/bin/pyrunway --standalone "$IMPL" "$@"

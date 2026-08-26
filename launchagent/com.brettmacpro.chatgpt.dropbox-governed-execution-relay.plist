@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>com.brettmacpro.chatgpt.dropbox-governed-execution-relay</string>
-<key>ProgramArguments</key><array><string>/usr/local/bin/dropbox-governed-execution-relay</string></array>
+<key>ProgramArguments</key><array><string>/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay/runtime/current/launcher/dropbox-governed-execution-relay</string></array>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><true/>
 <key>ThrottleInterval</key><integer>5</integer>
