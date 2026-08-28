@@ -30,7 +30,7 @@ class R0Tests(unittest.TestCase):
         rid=self.rid(); d=self.root/"Ingress"/rid; d.mkdir(parents=True); q=json.dumps(request(rid),indent=2).encode(); (d/"request.json").write_bytes(q); (d/"READY.json").write_bytes(relay.canonical({"schema_version":relay.READY_SCHEMA,"request_id":rid,"request_sha256":hashlib.sha256(q).hexdigest(),"request_size":len(q)})); self.assertIsNone(self.r.validate_package(d)); self.assertEqual("NONCANONICAL_REQUEST",json.loads((self.root/"Runs"/rid/"result.json").read_text())["classification"])
     def test_two_queued_sorted(self):
         publish(self.root,self.rid(2)); publish(self.root,self.rid(1)); seen=[]
-        with mock.patch.object(self.r,"process_one",side_effect=lambda p: seen.append(p.name) or True): self.r.scan_once()
+        with mock.patch.object(relay,"resident_surface_identity",return_value=("0"*64,[])), mock.patch.object(self.r,"process_one",side_effect=lambda p: seen.append(p.name) or True): self.r.scan_once()
         self.assertEqual([self.rid(1),self.rid(2)],seen)
     def test_o_excl_claim_idempotent(self):
         rid=self.rid(); a=relay.claim_once(self.state,rid); b=relay.claim_once(self.state,rid); self.assertEqual(a,b); self.assertEqual(rid,json.loads(a.read_text())["request_id"])
@@ -99,7 +99,8 @@ class R0Tests(unittest.TestCase):
     def test_terminal_result_write_once(self):
         rid=self.rid(); self.r.result(rid,"SUCCESS","ONE"); self.r.result(rid,"BLOCKED","TWO"); self.assertEqual("ONE",json.loads((self.root/"Runs"/rid/"result.json").read_text())["classification"])
     def test_health_sequence_monotonic(self):
-        self.r.heartbeat(); a=json.loads((self.root/"Control"/"health.json").read_text())["sequence"]; self.r.heartbeat(); b=json.loads((self.root/"Control"/"health.json").read_text())["sequence"]; self.assertGreater(b,a)
+        with mock.patch.object(relay,"resident_surface_identity",return_value=("0"*64,[])):
+            self.r.heartbeat(); a=json.loads((self.root/"Control"/"health.json").read_text())["sequence"]; self.r.heartbeat(); b=json.loads((self.root/"Control"/"health.json").read_text())["sequence"]; self.assertGreater(b,a)
 
     def test_state_root_symlink_rejected_before_resolve(self):
         target=Path(self.t.name)/"real-state"; target.mkdir(); link=Path(self.t.name)/"state-link"; link.symlink_to(target, target_is_directory=True)
