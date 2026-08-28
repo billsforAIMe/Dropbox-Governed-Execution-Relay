@@ -16,11 +16,12 @@ from typing import Any
 PROTOCOL = "DGER_R0_V1"
 REQUEST_SCHEMA = "DGER_R0_REQUEST_V1"
 READY_SCHEMA = "DGER_R0_READY_V1"
-QUALIFIED_GEP_SHA = "fe088a93eee537dbe7f8857aec85303f151cbb63"
-QUALIFIED_GEP_TREE = "a31ebcfae3b645a8a9bc47f46daddfbf7c10f545"
+QUALIFIED_GEP_SHA = "aa755d8941f7b0d46343c7e6b0d36c5f4cc40c15"
+QUALIFIED_GEP_TREE = "26ebad2517b29eabf47110144e8534a07b62f015"
 QUALIFIED_OPERATION = "platform.self_check"
 QUALIFIED_PROJECT = "ai-me"
 GEP_BARE = Path("/Users/brettmacpro/ChatGPT/Git/Tools/Governed Execution Platform.git")
+DGER_BARE = Path("/Users/brettmacpro/ChatGPT/Git/Tools/Dropbox Governed Execution Relay.git")
 PYRUNWAY = Path("/usr/local/bin/pyrunway")
 CHM = Path("/usr/local/bin/handoff-manager")
 CHM_SLOT = "Handoff100"
@@ -91,6 +92,46 @@ def git_main_identity() -> tuple[str, str]:
     sha = g("rev-parse", "refs/heads/main")
     return sha, g("rev-parse", f"{sha}^{{tree}}")
 
+
+def resident_surface_identity() -> tuple[str, list[dict[str, Any]]]:
+    runtime = DEFAULT_STATE / "runtime/current"
+    specs = [
+        (".python-version", ".python-version", runtime / ".python-version", 0o644),
+        ("pyproject.toml", "pyproject.toml", runtime / "pyproject.toml", 0o644),
+        ("uv.lock", "uv.lock", runtime / "uv.lock", 0o644),
+        ("scripts/dger.py", "scripts/dger.py", runtime / "scripts/dger.py", 0o644),
+        ("src/dger/__init__.py", "src/dger/__init__.py", runtime / "src/dger/__init__.py", 0o644),
+        ("src/dger/relay.py", "src/dger/relay.py", runtime / "src/dger/relay.py", 0o644),
+        ("launcher/dropbox-governed-execution-relay", "launcher/dropbox-governed-execution-relay", runtime / "launcher/dropbox-governed-execution-relay", 0o755),
+        ("launchagent/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist", "launchagent/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist", Path.home() / "Library/LaunchAgents/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist", 0o644),
+    ]
+    rows: list[dict[str, Any]] = []
+    for source_path, logical_path, path, expected_mode in specs:
+        if not path.is_absolute():
+            raise RuntimeError(f"DGER_RESIDENT_SURFACE_NONABSOLUTE:{logical_path}")
+        cur = Path("/")
+        for part in path.parts[1:]:
+            cur = cur / part
+            try: cst = cur.lstat()
+            except FileNotFoundError as exc: raise RuntimeError(f"DGER_RESIDENT_SURFACE_MISSING:{logical_path}:{cur}") from exc
+            if stat.S_ISLNK(cst.st_mode):
+                raise RuntimeError(f"DGER_RESIDENT_SURFACE_SYMLINK:{logical_path}:{cur}")
+        st = path.lstat()
+        if not stat.S_ISREG(st.st_mode):
+            raise RuntimeError(f"DGER_RESIDENT_SURFACE_UNSAFE:{logical_path}")
+        observed_mode = stat.S_IMODE(st.st_mode)
+        if observed_mode != expected_mode:
+            raise RuntimeError(f"DGER_RESIDENT_SURFACE_MODE:{logical_path}:{observed_mode:04o}")
+        data = path.read_bytes()
+        rows.append({
+            "source_path": source_path,
+            "logical_path": logical_path,
+            "runtime_path": str(path),
+            "mode": f"{expected_mode:04o}",
+            "size": len(data),
+            "sha256": digest(data),
+        })
+    return digest(canonical(rows)), rows
 
 def qualified() -> bool:
     try:
@@ -332,7 +373,19 @@ class Relay:
         seq += 1
         tmp = self.sequence_file.with_name(f".{self.sequence_file.name}.{os.getpid()}.tmp")
         tmp.write_text(str(seq)); os.replace(tmp, self.sequence_file)
-        atomic_json(self.control / "health.json", {"schema_version": PROTOCOL, "sequence": seq, "updated_at_utc": utc(), "relay_state": state, "protocol_version": PROTOCOL, "expected_interval_seconds": EXPECTED_INTERVAL_SECONDS, "qualified_gep_operation": QUALIFIED_OPERATION, "qualified_gep_commit": QUALIFIED_GEP_SHA}, 0o644)
+        surface_sha, surface_rows = resident_surface_identity()
+        atomic_json(self.control / "health.json", {
+            "schema_version": PROTOCOL,
+            "sequence": seq,
+            "updated_at_utc": utc(),
+            "relay_state": state,
+            "protocol_version": PROTOCOL,
+            "expected_interval_seconds": EXPECTED_INTERVAL_SECONDS,
+            "qualified_gep_operation": QUALIFIED_OPERATION,
+            "qualified_gep_commit": QUALIFIED_GEP_SHA,
+            "dger_resident_surface_sha256": surface_sha,
+            "dger_resident_surface": surface_rows,
+        }, 0o644)
 
     def status(self, rid: str, state: str, **extra: Any) -> None:
         atomic_json(safe_output_dir(self.runs, rid) / "status.json", {"schema_version": PROTOCOL, "request_id": rid, "state": state, "updated_at_utc": utc(), **extra}, 0o644)
