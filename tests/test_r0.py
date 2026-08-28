@@ -1,7 +1,7 @@
 from __future__ import annotations
 import hashlib, json
 from pathlib import Path
-import sys, tempfile, unittest
+import os, sys, tempfile, unittest
 from unittest import mock
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
@@ -30,7 +30,7 @@ class R0Tests(unittest.TestCase):
         rid=self.rid(); d=self.root/"Ingress"/rid; d.mkdir(parents=True); q=json.dumps(request(rid),indent=2).encode(); (d/"request.json").write_bytes(q); (d/"READY.json").write_bytes(relay.canonical({"schema_version":relay.READY_SCHEMA,"request_id":rid,"request_sha256":hashlib.sha256(q).hexdigest(),"request_size":len(q)})); self.assertIsNone(self.r.validate_package(d)); self.assertEqual("NONCANONICAL_REQUEST",json.loads((self.root/"Runs"/rid/"result.json").read_text())["classification"])
     def test_two_queued_sorted(self):
         publish(self.root,self.rid(2)); publish(self.root,self.rid(1)); seen=[]
-        with mock.patch.object(self.r,"process_one",side_effect=lambda p: seen.append(p.name) or True): self.r.scan_once()
+        with mock.patch.object(relay,"resident_surface_identity",return_value=("0"*64,[])), mock.patch.object(self.r,"process_one",side_effect=lambda p: seen.append(p.name) or True): self.r.scan_once()
         self.assertEqual([self.rid(1),self.rid(2)],seen)
     def test_o_excl_claim_idempotent(self):
         rid=self.rid(); a=relay.claim_once(self.state,rid); b=relay.claim_once(self.state,rid); self.assertEqual(a,b); self.assertEqual(rid,json.loads(a.read_text())["request_id"])
@@ -99,7 +99,8 @@ class R0Tests(unittest.TestCase):
     def test_terminal_result_write_once(self):
         rid=self.rid(); self.r.result(rid,"SUCCESS","ONE"); self.r.result(rid,"BLOCKED","TWO"); self.assertEqual("ONE",json.loads((self.root/"Runs"/rid/"result.json").read_text())["classification"])
     def test_health_sequence_monotonic(self):
-        self.r.heartbeat(); a=json.loads((self.root/"Control"/"health.json").read_text())["sequence"]; self.r.heartbeat(); b=json.loads((self.root/"Control"/"health.json").read_text())["sequence"]; self.assertGreater(b,a)
+        with mock.patch.object(relay,"resident_surface_identity",return_value=("0"*64,[])):
+            self.r.heartbeat(); a=json.loads((self.root/"Control"/"health.json").read_text())["sequence"]; self.r.heartbeat(); b=json.loads((self.root/"Control"/"health.json").read_text())["sequence"]; self.assertGreater(b,a)
 
     def test_state_root_symlink_rejected_before_resolve(self):
         target=Path(self.t.name)/"real-state"; target.mkdir(); link=Path(self.t.name)/"state-link"; link.symlink_to(target, target_is_directory=True)
@@ -113,11 +114,13 @@ class R0Tests(unittest.TestCase):
         saved=relay.read_state(self.state,rid)
         self.assertEqual("GEP_STARTING",saved["phase"]); self.assertEqual(1,saved["attempts"]); self.assertTrue(saved["gep_target"].endswith("/scripts/governed_exec.py")); popen.assert_called_once()
     def test_starting_crash_window_adopts_without_relaunch(self):
-        rid=self.rid(41); d=publish(self.root,rid); ad=self.state/"attempts"/rid/"attempt-1"; target=ad/"gep-tree"/"scripts"/"governed_exec.py"; target.parent.mkdir(parents=True); target.write_text("# fake\n")
-        cur={"request_id":rid,"attempts":1,"phase":"GEP_STARTING","attempt_dir":str(ad),"gep_target":str(target),"chm_slot":relay.CHM_SLOT}; relay.save_state(self.state,rid,cur)
-        with mock.patch.object(relay,"qualified",return_value=True), mock.patch.object(relay,"read_gep_terminal",return_value=(None,"","")), mock.patch.object(relay,"find_attempt_process",return_value=(4321,"stable-ident")), mock.patch.object(relay,"start_gep") as start:
+        rid=self.rid(41); d=publish(self.root,rid); ad=self.state/"attempts"/rid/"attempt-1"; tree=ad/"gep-tree"; target=tree/"scripts"/"governed_exec.py"; target.parent.mkdir(parents=True); target.write_text("# fake\n"); (tree/".venv/bin").mkdir(parents=True); py=tree/".venv/bin/python"; py.write_text("x")
+        cur={"request_id":rid,"attempts":1,"phase":"GEP_STARTING","attempt_dir":str(ad),"gep_target":str(target.resolve()),"chm_slot":relay.CHM_SLOT}; relay.save_state(self.state,rid,cur)
+        info={"pid":4321,"ppid":1,"uid":os.getuid(),"start_sec":10,"start_usec":20}; argv=[str(py.resolve()),str(target.resolve()),"self-check",relay.QUALIFIED_PROJECT]
+        def names(pid,desc):return [str(tree.resolve())] if desc=="cwd" else [str(py.resolve())]
+        with mock.patch.object(relay,"qualified",return_value=True),mock.patch.object(relay,"read_gep_terminal",return_value=(None,"","")),mock.patch.object(relay,"_native_pids",return_value=[4321]),mock.patch.object(relay,"_bsd_identity",return_value=info),mock.patch.object(relay,"_native_argv",side_effect=[argv,argv]),mock.patch.object(relay,"_lsof_names",side_effect=names),mock.patch.object(relay,"start_gep") as start:
             self.r.process_one(d); start.assert_not_called()
-        saved=relay.read_state(self.state,rid); self.assertEqual("GEP_RUNNING",saved["phase"]); self.assertEqual(1,saved["attempts"]); self.assertEqual(4321,saved["gep_pid"]); self.assertEqual("stable-ident",saved["gep_process_identity"])
+        saved=relay.read_state(self.state,rid); self.assertEqual("GEP_RUNNING",saved["phase"]); self.assertEqual(1,saved["attempts"]); self.assertEqual(4321,saved["gep_pid"]); self.assertRegex(saved["gep_process_identity"],r"^[0-9a-f]{64}$")
     def test_second_starting_reservation_cannot_launch_third_attempt(self):
         rid=self.rid(42); d=publish(self.root,rid); ad=self.state/"attempts"/rid/"attempt-2"; target=ad/"gep-tree"/"scripts"/"governed_exec.py"; target.parent.mkdir(parents=True); target.write_text("# fake\n")
         cur={"request_id":rid,"attempts":2,"phase":"GEP_STARTING","attempt_dir":str(ad),"gep_target":str(target),"chm_slot":relay.CHM_SLOT}; relay.save_state(self.state,rid,cur)
