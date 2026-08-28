@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -8,6 +10,8 @@ import re
 import secrets
 import shutil
 import stat
+import struct
+import sys
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -16,11 +20,12 @@ from typing import Any
 PROTOCOL = "DGER_R0_V1"
 REQUEST_SCHEMA = "DGER_R0_REQUEST_V1"
 READY_SCHEMA = "DGER_R0_READY_V1"
-QUALIFIED_GEP_SHA = "fe088a93eee537dbe7f8857aec85303f151cbb63"
-QUALIFIED_GEP_TREE = "a31ebcfae3b645a8a9bc47f46daddfbf7c10f545"
+QUALIFIED_GEP_SHA = "aa755d8941f7b0d46343c7e6b0d36c5f4cc40c15"
+QUALIFIED_GEP_TREE = "26ebad2517b29eabf47110144e8534a07b62f015"
 QUALIFIED_OPERATION = "platform.self_check"
 QUALIFIED_PROJECT = "ai-me"
 GEP_BARE = Path("/Users/brettmacpro/ChatGPT/Git/Tools/Governed Execution Platform.git")
+DGER_BARE = Path("/Users/brettmacpro/ChatGPT/Git/Tools/Dropbox Governed Execution Relay.git")
 PYRUNWAY = Path("/usr/local/bin/pyrunway")
 CHM = Path("/usr/local/bin/handoff-manager")
 CHM_SLOT = "Handoff100"
@@ -91,6 +96,46 @@ def git_main_identity() -> tuple[str, str]:
     sha = g("rev-parse", "refs/heads/main")
     return sha, g("rev-parse", f"{sha}^{{tree}}")
 
+
+def resident_surface_identity() -> tuple[str, list[dict[str, Any]]]:
+    runtime = DEFAULT_STATE / "runtime/current"
+    specs = [
+        (".python-version", ".python-version", runtime / ".python-version", 0o644),
+        ("pyproject.toml", "pyproject.toml", runtime / "pyproject.toml", 0o644),
+        ("uv.lock", "uv.lock", runtime / "uv.lock", 0o644),
+        ("scripts/dger.py", "scripts/dger.py", runtime / "scripts/dger.py", 0o644),
+        ("src/dger/__init__.py", "src/dger/__init__.py", runtime / "src/dger/__init__.py", 0o644),
+        ("src/dger/relay.py", "src/dger/relay.py", runtime / "src/dger/relay.py", 0o644),
+        ("launcher/dropbox-governed-execution-relay", "launcher/dropbox-governed-execution-relay", runtime / "launcher/dropbox-governed-execution-relay", 0o755),
+        ("launchagent/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist", "launchagent/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist", Path.home() / "Library/LaunchAgents/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist", 0o644),
+    ]
+    rows: list[dict[str, Any]] = []
+    for source_path, logical_path, path, expected_mode in specs:
+        if not path.is_absolute():
+            raise RuntimeError(f"DGER_RESIDENT_SURFACE_NONABSOLUTE:{logical_path}")
+        cur = Path("/")
+        for part in path.parts[1:]:
+            cur = cur / part
+            try: cst = cur.lstat()
+            except FileNotFoundError as exc: raise RuntimeError(f"DGER_RESIDENT_SURFACE_MISSING:{logical_path}:{cur}") from exc
+            if stat.S_ISLNK(cst.st_mode):
+                raise RuntimeError(f"DGER_RESIDENT_SURFACE_SYMLINK:{logical_path}:{cur}")
+        st = path.lstat()
+        if not stat.S_ISREG(st.st_mode):
+            raise RuntimeError(f"DGER_RESIDENT_SURFACE_UNSAFE:{logical_path}")
+        observed_mode = stat.S_IMODE(st.st_mode)
+        if observed_mode != expected_mode:
+            raise RuntimeError(f"DGER_RESIDENT_SURFACE_MODE:{logical_path}:{observed_mode:04o}")
+        data = path.read_bytes()
+        rows.append({
+            "source_path": source_path,
+            "logical_path": logical_path,
+            "runtime_path": str(path),
+            "mode": f"{expected_mode:04o}",
+            "size": len(data),
+            "sha256": digest(data),
+        })
+    return digest(canonical(rows)), rows
 
 def qualified() -> bool:
     try:
@@ -180,48 +225,179 @@ def save_state(state: Path, request_id: str, value: dict[str, Any]) -> None:
     atomic_json(_state_path(state, request_id), value)
 
 
-def process_identity(pid: int) -> str | None:
-    cp = subprocess.run(["/bin/ps", "-p", str(pid), "-o", "lstart=", "-o", "command="], capture_output=True, text=True, timeout=5)
-    if cp.returncode or not cp.stdout.strip():
-        return None
-    return digest(cp.stdout.strip().encode())
+KERN_PROCARGS2 = 49
 
 
-def is_same_live_process(pid: Any, identity: Any) -> bool:
-    if not isinstance(pid, int) or pid <= 1 or not isinstance(identity, str):
-        return False
+class _ProcBsdInfo(ctypes.Structure):
+    _fields_ = [
+        ("pbi_flags", ctypes.c_uint32), ("pbi_status", ctypes.c_uint32), ("pbi_xstatus", ctypes.c_uint32),
+        ("pbi_pid", ctypes.c_uint32), ("pbi_ppid", ctypes.c_uint32),
+        ("pbi_uid", ctypes.c_uint32), ("pbi_gid", ctypes.c_uint32), ("pbi_ruid", ctypes.c_uint32), ("pbi_rgid", ctypes.c_uint32),
+        ("pbi_svuid", ctypes.c_uint32), ("pbi_svgid", ctypes.c_uint32), ("rfu_1", ctypes.c_uint32),
+        ("pbi_comm", ctypes.c_char * 16), ("pbi_name", ctypes.c_char * 32),
+        ("pbi_nfiles", ctypes.c_uint32), ("pbi_pgid", ctypes.c_uint32), ("pbi_pjobc", ctypes.c_uint32),
+        ("e_tdev", ctypes.c_uint32), ("e_tpgid", ctypes.c_uint32), ("pbi_nice", ctypes.c_int32),
+        ("pbi_start_tvsec", ctypes.c_uint64), ("pbi_start_tvusec", ctypes.c_uint64),
+    ]
+
+
+def _libproc():
+    if sys.platform != "darwin": raise RuntimeError("DARWIN_PROCESS_INSPECTION_REQUIRED")
+    return ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+
+
+def _native_pids() -> list[int]:
+    lib=_libproc(); fn=lib.proc_listallpids; fn.argtypes=[ctypes.c_void_p,ctypes.c_int]; fn.restype=ctypes.c_int
+    count=fn(None,0)
+    if count<=0 or count>1_000_000: raise RuntimeError("PROC_LISTALLPIDS_COUNT_INVALID")
+    arr=(ctypes.c_int*(count+64))(); got=fn(ctypes.cast(arr,ctypes.c_void_p),ctypes.sizeof(arr))
+    if got<0: raise RuntimeError("PROC_LISTALLPIDS_FAILED")
+    return sorted({int(arr[i]) for i in range(min(got,len(arr))) if int(arr[i])>1})
+
+
+def _bsd_identity(pid:int)->dict[str,int]:
+    lib=_libproc(); fn=lib.proc_pidinfo; fn.argtypes=[ctypes.c_int,ctypes.c_int,ctypes.c_uint64,ctypes.c_void_p,ctypes.c_int]; fn.restype=ctypes.c_int
+    info=_ProcBsdInfo(); ctypes.set_errno(0); got=fn(int(pid),3,0,ctypes.byref(info),ctypes.sizeof(info))
+    if got!=ctypes.sizeof(info):
+        err=ctypes.get_errno()
+        if err in (errno.ESRCH,errno.EINVAL) or got==0: raise ProcessLookupError(pid)
+        raise RuntimeError(f"PROC_PIDTBSDINFO_FAILED:{pid}:{got}:{err}")
+    if int(info.pbi_pid)!=int(pid): raise RuntimeError(f"PROC_PIDTBSDINFO_PID_MISMATCH:{pid}:{info.pbi_pid}")
+    return {"pid":int(info.pbi_pid),"ppid":int(info.pbi_ppid),"uid":int(info.pbi_uid),"start_sec":int(info.pbi_start_tvsec),"start_usec":int(info.pbi_start_tvusec)}
+
+
+def _argv_from_procargs(raw:bytes,pid:int)->list[str]:
+    if len(raw)<4: raise RuntimeError(f"NATIVE_ARGV_TRUNCATED:{pid}")
+    argc=struct.unpack("=i",raw[:4])[0]
+    if argc<1 or argc>4096: raise RuntimeError(f"NATIVE_ARGV_ARGC_INVALID:{pid}:{argc}")
+    i=4; end=raw.find(b"\0",i)
+    if end<0: raise RuntimeError(f"NATIVE_ARGV_EXEC_UNTERMINATED:{pid}")
+    i=end+1
+    while i<len(raw) and raw[i]==0: i+=1
+    argv=[]
+    for _ in range(argc):
+        if i>=len(raw): raise RuntimeError(f"NATIVE_ARGV_TRUNCATED:{pid}")
+        end=raw.find(b"\0",i)
+        if end<0: raise RuntimeError(f"NATIVE_ARGV_UNTERMINATED:{pid}")
+        argv.append(os.fsdecode(raw[i:end])); i=end+1
+    if len(argv)!=argc or any(not isinstance(x,str) or not x for x in argv): raise RuntimeError(f"NATIVE_ARGV_MALFORMED:{pid}")
+    return argv
+
+
+def _native_argv(pid:int)->list[str]:
+    if sys.platform!="darwin": raise RuntimeError("DARWIN_PROCESS_INSPECTION_REQUIRED")
+    libc=ctypes.CDLL(None,use_errno=True); fn=libc.sysctl
+    fn.argtypes=[ctypes.POINTER(ctypes.c_int),ctypes.c_uint,ctypes.c_void_p,ctypes.POINTER(ctypes.c_size_t),ctypes.c_void_p,ctypes.c_size_t]; fn.restype=ctypes.c_int
+    mib=(ctypes.c_int*3)(1,KERN_PROCARGS2,int(pid))
+    for attempt in range(2):
+        size=ctypes.c_size_t(0); ctypes.set_errno(0)
+        if fn(mib,3,None,ctypes.byref(size),None,0)!=0:
+            err=ctypes.get_errno()
+            if err in (errno.ESRCH,errno.EINVAL): raise ProcessLookupError(pid)
+            raise RuntimeError(f"NATIVE_ARGV_SIZE_FAILED:{pid}:{err}")
+        if size.value<4 or size.value>4*1024*1024: raise RuntimeError(f"NATIVE_ARGV_SIZE_INVALID:{pid}:{size.value}")
+        buf=ctypes.create_string_buffer(size.value); actual=ctypes.c_size_t(size.value); ctypes.set_errno(0)
+        if fn(mib,3,buf,ctypes.byref(actual),None,0)==0: return _argv_from_procargs(buf.raw[:actual.value],pid)
+        err=ctypes.get_errno()
+        if err==errno.ENOMEM and attempt==0: continue
+        if err in (errno.ESRCH,errno.EINVAL): raise ProcessLookupError(pid)
+        raise RuntimeError(f"NATIVE_ARGV_READ_FAILED:{pid}:{err}")
+    raise RuntimeError(f"NATIVE_ARGV_UNSTABLE:{pid}")
+
+
+def _lsof_names(pid:int,descriptor:str)->list[str]:
+    cp=subprocess.run(["/usr/sbin/lsof","-a","-p",str(pid),"-d",descriptor,"-Fn"],capture_output=True,timeout=5)
+    if cp.returncode not in (0,1): raise RuntimeError(f"LSOF_INSPECTION_FAILED:{pid}:{descriptor}")
+    return [line[1:] for line in cp.stdout.decode("utf-8","replace").splitlines() if line.startswith("n") and len(line)>1]
+
+
+def _no_symlink_components(path:Path,allow_leaf_symlink:bool=False)->None:
+    p=Path(path)
+    if not p.is_absolute(): raise RuntimeError(f"PROCESS_PATH_NOT_ABSOLUTE:{p}")
+    cur=Path("/"); parts=p.parts[1:]
+    for idx,part in enumerate(parts):
+        cur=cur/part
+        try: st=cur.lstat()
+        except FileNotFoundError as exc: raise RuntimeError(f"PROCESS_PATH_MISSING:{cur}") from exc
+        if stat.S_ISLNK(st.st_mode) and not (allow_leaf_symlink and idx==len(parts)-1): raise RuntimeError(f"PROCESS_PATH_SYMLINK:{cur}")
+
+
+def _expected_gep_target(target:str|Path)->tuple[Path,Path]:
+    p=Path(target); _no_symlink_components(p)
+    if not p.is_file() or p.name!="governed_exec.py" or p.parent.name!="scripts" or p.parent.parent.name!="gep-tree": raise RuntimeError(f"GEP_ATTEMPT_TARGET_INVALID:{p}")
+    physical=p.resolve(strict=True)
+    if p!=physical: raise RuntimeError(f"GEP_ATTEMPT_TARGET_NONCANONICAL:{p}")
+    tree=p.parent.parent; _no_symlink_components(tree)
+    if not tree.is_dir(): raise RuntimeError(f"GEP_ATTEMPT_TREE_INVALID:{tree}")
+    return p,tree
+
+
+def _samefile(a:Path,b:Path)->bool:
+    try:return a.samefile(b)
+    except Exception:return False
+
+
+def _allowed_gep_executable(tree:Path,observed:Path)->bool:
+    candidates=[PYRUNWAY,tree/".venv/bin/python",tree/".venv/bin/python3",tree/".venv/bin/python3.14"]
+    for candidate in candidates:
+        try:_no_symlink_components(candidate,allow_leaf_symlink=True)
+        except RuntimeError:continue
+        if candidate.exists() and _samefile(candidate,observed):return True
+    return False
+
+
+def _owned_attempt_process(pid:int,target:str|Path,argv:list[str]|None=None)->dict[str,Any]:
+    target_path,tree=_expected_gep_target(target); before=_bsd_identity(pid)
+    if before["uid"]!=os.getuid(): raise RuntimeError(f"GEP_ATTEMPT_WRONG_UID:{pid}:{before['uid']}")
+    argv=_native_argv(pid) if argv is None else list(argv); expected=[str(target_path),"self-check",QUALIFIED_PROJECT]
+    if len(argv)!=4 or argv[1:]!=expected: raise RuntimeError(f"GEP_ATTEMPT_ARGV_OWNERSHIP:{pid}")
+    cwds=sorted(set(_lsof_names(pid,"cwd")))
+    if len(cwds)!=1: raise RuntimeError(f"GEP_ATTEMPT_CWD_AMBIGUOUS:{pid}:{len(cwds)}")
+    cwd=Path(cwds[0]); _no_symlink_components(cwd)
+    if not cwd.is_dir() or not _samefile(cwd,tree): raise RuntimeError(f"GEP_ATTEMPT_CWD_OWNERSHIP:{pid}:{cwd}")
+    txts=sorted(set(_lsof_names(pid,"txt")))
+    if len(txts)!=1: raise RuntimeError(f"GEP_ATTEMPT_TXT_AMBIGUOUS:{pid}:{len(txts)}")
+    txt=Path(txts[0]); _no_symlink_components(txt)
+    if not txt.is_file() or not _allowed_gep_executable(tree,txt): raise RuntimeError(f"GEP_ATTEMPT_EXECUTABLE_OWNERSHIP:{pid}:{txt}")
+    after=_bsd_identity(pid)
+    if before!=after: raise RuntimeError(f"GEP_ATTEMPT_PID_REUSED_DURING_INSPECTION:{pid}")
+    return {"pid":pid,"uid":before["uid"],"ppid":before["ppid"],"start_sec":before["start_sec"],"start_usec":before["start_usec"],"argv":argv,"cwd":str(cwd.resolve(strict=True)),"txt":str(txt.resolve(strict=True)),"target":str(target_path)}
+
+
+def process_identity(pid:int)->str|None:
     try:
-        return process_identity(pid) == identity
-    except Exception:
-        return False
+        argv=_native_argv(pid)
+        if len(argv)!=4 or argv[2:]!=["self-check",QUALIFIED_PROJECT]:return None
+        return digest(canonical(_owned_attempt_process(pid,argv[1],argv)))
+    except Exception:return None
 
+def is_same_live_process(pid:Any,identity:Any)->bool:
+    if not isinstance(pid,int) or pid<=1 or not isinstance(identity,str) or not re.fullmatch(r"[0-9a-f]{64}",identity):return False
+    return process_identity(pid)==identity
 
-def find_attempt_process(target: Any) -> tuple[int, str] | None:
-    if not isinstance(target, str) or not target:
-        return None
-    try:
-        physical = str(Path(target).resolve(strict=True))
-    except Exception:
-        return None
-    cp = subprocess.run(["/bin/ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=5)
-    if cp.returncode:
-        return None
-    matches: list[tuple[int, str]] = []
-    for line in cp.stdout.splitlines():
-        parts = line.strip().split(None, 1)
-        if len(parts) != 2 or physical not in parts[1]:
-            continue
+def find_attempt_process(target:Any)->tuple[int,str]|None:
+    if not isinstance(target,str) or not target:return None
+    try:target_path,_tree=_expected_gep_target(target)
+    except Exception:return None
+    wanted=str(target_path); valid=[]; invalid=[]
+    try:pids=_native_pids()
+    except Exception as exc:raise RuntimeError("GEP_ATTEMPT_PID_ENUMERATION_FAILED") from exc
+    for pid in pids:
+        if pid==os.getpid():continue
         try:
-            pid = int(parts[0])
-        except ValueError:
-            continue
-        ident = process_identity(pid)
-        if ident:
-            matches.append((pid, ident))
-    if len(matches) > 1:
-        raise RuntimeError("MULTIPLE_GEP_ATTEMPT_PROCESSES")
-    return matches[0] if matches else None
-
+            info=_bsd_identity(pid)
+            if info["uid"]!=os.getuid():continue
+            argv=_native_argv(pid)
+        except ProcessLookupError:continue
+        except Exception:continue
+        if wanted not in argv:continue
+        if len(argv)!=4 or argv[1:]!=[wanted,"self-check",QUALIFIED_PROJECT]:invalid.append(pid);continue
+        try:rec=_owned_attempt_process(pid,wanted,argv)
+        except Exception:invalid.append(pid);continue
+        valid.append((pid,digest(canonical(rec))))
+    if invalid:raise RuntimeError("UNOWNED_GEP_ATTEMPT_TARGET_PROCESS:"+",".join(str(x) for x in sorted(invalid)))
+    if len(valid)>1:raise RuntimeError("MULTIPLE_GEP_ATTEMPT_PROCESSES")
+    return valid[0] if valid else None
 
 def reconstruct_gep(attempt_dir: Path) -> Path:
     tree = attempt_dir / "gep-tree"
@@ -332,7 +508,19 @@ class Relay:
         seq += 1
         tmp = self.sequence_file.with_name(f".{self.sequence_file.name}.{os.getpid()}.tmp")
         tmp.write_text(str(seq)); os.replace(tmp, self.sequence_file)
-        atomic_json(self.control / "health.json", {"schema_version": PROTOCOL, "sequence": seq, "updated_at_utc": utc(), "relay_state": state, "protocol_version": PROTOCOL, "expected_interval_seconds": EXPECTED_INTERVAL_SECONDS, "qualified_gep_operation": QUALIFIED_OPERATION, "qualified_gep_commit": QUALIFIED_GEP_SHA}, 0o644)
+        surface_sha, surface_rows = resident_surface_identity()
+        atomic_json(self.control / "health.json", {
+            "schema_version": PROTOCOL,
+            "sequence": seq,
+            "updated_at_utc": utc(),
+            "relay_state": state,
+            "protocol_version": PROTOCOL,
+            "expected_interval_seconds": EXPECTED_INTERVAL_SECONDS,
+            "qualified_gep_operation": QUALIFIED_OPERATION,
+            "qualified_gep_commit": QUALIFIED_GEP_SHA,
+            "dger_resident_surface_sha256": surface_sha,
+            "dger_resident_surface": surface_rows,
+        }, 0o644)
 
     def status(self, rid: str, state: str, **extra: Any) -> None:
         atomic_json(safe_output_dir(self.runs, rid) / "status.json", {"schema_version": PROTOCOL, "request_id": rid, "state": state, "updated_at_utc": utc(), **extra}, 0o644)
