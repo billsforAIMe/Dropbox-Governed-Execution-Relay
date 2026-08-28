@@ -2,7 +2,7 @@
 
 Prototype R0 proves a zero-Owner-courier loop from Chat-authored Dropbox request to a resident Mac relay, CHM ownership, one fixed GEP `platform.self_check` operation, and Dropbox result.
 
-Hard qualification: GEP bare `main` must remain `fe088a93eee537dbe7f8857aec85303f151cbb63`; otherwise requests fail closed as `CLASSIFICATION_VOID` until requalified.
+Hard qualification: GEP bare `main` must remain `aa755d8941f7b0d46343c7e6b0d36c5f4cc40c15`; otherwise requests fail closed as `CLASSIFICATION_VOID` until requalified.
 
 The only request project/operation pair is `ai-me` / `platform.self_check`. The GEP operation accepts no arguments.
 
