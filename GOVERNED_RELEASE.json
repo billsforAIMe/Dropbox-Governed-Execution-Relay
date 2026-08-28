@@ -24,7 +24,7 @@
   },
   "manifest_schema_major": 1,
   "normative_files": [],
-  "release_generation": 1,
+  "release_generation": 2,
   "release_selector_contract": {
     "ancestry_preserving_forward_cas": true,
     "delivered_objects_remain_reachable": true,
@@ -33,13 +33,11 @@
   },
   "rolls_back_to_generation": null,
   "runtime_compatibility": {
-    "compatible_runtime_commits": [
-      "0b7ea2bc7431d49dbfda2a8283f31c432787c7f5"
-    ],
-    "note": "One-time docs/config migration preserves the immediately preceding runtime provenance where code/runtime bytes are unchanged.",
+    "compatible_runtime_commits": [],
+    "note": "Generation 2 changes DGER runtime/deployment bytes; no prior runtime commit is declared compatible.",
     "policy": "exact_or_explicit_immutable_tool_release_declaration"
   },
-  "supersedes_generation": null,
+  "supersedes_generation": 1,
   "tool_id": "dropbox-governed-execution-relay",
   "withdrawn_generations": []
 }
