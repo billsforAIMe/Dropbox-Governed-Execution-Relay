@@ -2,17 +2,18 @@
 
 Project-local persistent governance binding: `GOVERNANCE_BINDING.md` from the authoritative Tool release commit. Project-specific deployment/quiescence rules are in `PROJECT_GOVERNANCE_PROFILE.md` from that same commit.
 
-Tool authority:
-- authoritative Git: `/Users/brettmacpro/ChatGPT/Git/Tools/Dropbox Governed Execution Relay.git`
-- release selector: `refs/heads/main`
-- authority root: `8a567d45d9fde17f6d7dd779368b48e6b4916d73`
-- Tool State: `/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay`
-- permanent Tool ID: `dropbox-governed-execution-relay`
+Tool authority resolution:
+- current Git authority is established only by the external Tool-State binding `GOVERNANCE/CURRENT_GIT_AUTHORITY.json`; this source file does not name a mutable authority location;
+- authority root: `8a567d45d9fde17f6d7dd779368b48e6b4916d73`;
+- permanent Tool ID: `dropbox-governed-execution-relay`;
+- the current release selector/locator are resolved from that external binding and then verified against the named Git authority before any authoritative act.
 
-For every governed act, resolve the exact current Software Governance release through `GOVERNANCE_BINDING.md` and apply it at act time. Resolve DGER current `main` directly from the Tool's authoritative Git; working checkouts, Google Drive, Dropbox, ChatGPT/File Library copies, bundles, and Tool Registry rows are subordinate material only.
+The current Tool-State location is an environment binding, not a source-location contract. A cloud Builder may use exact captured binding evidence for non-consequential development/falsification, but any consequential authority/publication act must resolve the current binding from its declared authority at act time.
+
+For every governed act, resolve the exact current Software Governance release through `GOVERNANCE_BINDING.md` and apply it at act time. Working checkouts, Google Drive, Dropbox, ChatGPT/File Library copies, bundles, mirrors, and Tool Registry rows are subordinate unless the current external DGER authority binding names the corresponding Git authority.
 
 DGER Prototype R0 remains a narrow Mac relay. GEP execution truth, CHM routing/ownership truth, the fixed `ai-me` / `platform.self_check` allowlist, `Handoff100`, two-attempt ceiling, and Dropbox protocol remain unchanged unless separately governed.
 
-Development source is disposable and may exist at any filesystem location. Delivered runtime MUST NOT depend on a development checkout. Host resources are explicit adapter bindings: DGER State, DGER authoritative Git, qualified GEP Git, PyRunway, CHM, and the Dropbox transport root are supplied by the installed Mac launcher/entrypoint boundary rather than discovered from neighboring source.
+Development source is disposable and may exist at any filesystem location. Delivered runtime MUST NOT depend on a development checkout or on the retired location of DGER's own Git authority. Host resources actually consumed at runtime are explicit adapter bindings: DGER State, qualified GEP Git/material, PyRunway, CHM, and the Dropbox transport root are supplied by the installed Mac launcher/entrypoint boundary rather than discovered from neighboring source.
 
-Use scratch-first development, proportionate falsification, and ancestry-preserving expected-predecessor/CAS publication to this Tool's own `main`. Do not modify another Tool's authority or source as a side effect.
+Use scratch-first development, proportionate falsification, and ancestry-preserving expected-predecessor/CAS publication to this Tool's currently bound authority. Do not modify another Tool's authority or source as a side effect.

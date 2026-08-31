@@ -19,6 +19,8 @@ class LocationIndependenceTests(unittest.TestCase):
     def test_mac_launcher_is_binding_boundary(self):
         text = (ROOT / "launcher/dropbox-governed-execution-relay").read_text()
         self.assertNotIn("/Users/brettmacpro", text)
+        self.assertNotIn("ChatGPT/Git/Tools/Dropbox Governed Execution Relay.git", text)
+        self.assertNotIn("DGER_MAIN_IDENTITY_MISMATCH", text)
         for flag in (
             "--transport-root",
             "--state-root",
@@ -32,6 +34,7 @@ class LocationIndependenceTests(unittest.TestCase):
         self.assertIn('MARKER="$SOFTWARE/NSP - Temporary Files"', text)
         self.assertIn('DROPBOX_ROOT_COUNT=$((DROPBOX_ROOT_COUNT + 1))', text)
         self.assertIn('DGER_DROPBOX_ROOT_AMBIGUOUS_OR_MISSING', text)
+        self.assertIn('DGER_GEP_BINDING_UNAVAILABLE', text)
 
     def test_launchagent_invokes_god_managed_runtime_launcher(self):
         text = (ROOT / "launchagent/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist").read_text()
