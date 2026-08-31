@@ -26,3 +26,7 @@ DGER reconstructs the exact qualified GEP Git commit into per-attempt durable St
 Before any GEP `Popen`, DGER durably increments the automatic-attempt count and records `GEP_STARTING` with the exact attempt directory and physical GEP target. A relay restart in that phase first accepts any already-terminal normalized GEP result, otherwise adopts only a live process whose command contains that exact per-attempt target. If neither exists after the bounded adoption scan, that launch reservation remains consumed; DGER may reserve the next attempt only when the count is still below two. A second `GEP_STARTING` reservation with no live/terminal child therefore terminates as `RERUN_LIMIT_EXCEEDED` and can never create a third GEP launch.
 
 The configured DGER State root is rejected if it is a symlink **before** `Path.resolve()` is applied; transport and State safety checks therefore cannot be bypassed by supplying a symlink as the root itself.
+
+## Host binding boundary
+
+The installed Mac adapter supplies DGER State, DGER authoritative Git, qualified GEP Git, PyRunway, CHM, and the Dropbox transport root as explicit entrypoint arguments. These are host resources, not development-source locations. The relay implementation does not locate them through caller `cwd`, sibling checkouts, `PYTHONPATH`, editable installs, or a development source root.

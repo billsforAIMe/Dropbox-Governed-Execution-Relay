@@ -9,3 +9,9 @@ The only request project/operation pair is `ai-me` / `platform.self_check`. The 
 Prototype R0 reconstructs the exact qualified GEP commit for every attempt, provisions its locked offline `.venv`, and invokes the fixed self-check through project-canonical strict PyRunway. Standalone PyRunway is used for the installed DGER launcher itself, not for GEP's governed CLI.
 
 Prototype R0 uses one dedicated CHM lane, `Handoff100`, because the relay is single-worker. It uses target-local CHM `assign/status` only and never depends on global `handoff-manager active`; a busy or unsafe dedicated lane produces visible degraded state and no GEP invocation.
+
+## Location-independent runtime binding
+
+DGER source does not encode a development checkout. The installed Mac launcher supplies the host-specific DGER State root, DGER/GEP Git authorities, PyRunway, CHM, and Dropbox transport root explicitly to `scripts/dger.py`. The relay core accepts those bindings as paths and preserves the R0 protocol/allowlist semantics. Moving or deleting a development checkout therefore does not change runtime resolution.
+
+The service is Mac-bound in operation; cloud/Linux is a development and falsification surface for the portable relay core, not a simulated Mac service.

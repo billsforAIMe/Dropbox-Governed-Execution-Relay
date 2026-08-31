@@ -20,11 +20,7 @@ QUALIFIED_GEP_SHA = "fe088a93eee537dbe7f8857aec85303f151cbb63"
 QUALIFIED_GEP_TREE = "a31ebcfae3b645a8a9bc47f46daddfbf7c10f545"
 QUALIFIED_OPERATION = "platform.self_check"
 QUALIFIED_PROJECT = "ai-me"
-GEP_BARE = Path("/Users/brettmacpro/ChatGPT/Git/Tools/Governed Execution Platform.git")
-PYRUNWAY = Path("/usr/local/bin/pyrunway")
-CHM = Path("/usr/local/bin/handoff-manager")
 CHM_SLOT = "Handoff100"
-DEFAULT_STATE = Path("/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay")
 EXPECTED_INTERVAL_SECONDS = 2
 HEALTH_STALE_SECONDS = 6
 MAX_ATTEMPTS = 2
@@ -68,23 +64,10 @@ def load_json_regular(path: Path) -> tuple[dict[str, Any], bytes]:
     return value, data
 
 
-def resolve_dropbox_root() -> Path:
-    base = Path.home() / "Library" / "CloudStorage"
-    roots: list[Path] = []
-    if base.is_dir():
-        for provider in base.iterdir():
-            marker = provider / "Software" / "NSP - Temporary Files"
-            if marker.is_dir() and not provider.is_symlink() and not marker.is_symlink():
-                roots.append(provider.resolve())
-    unique = sorted({str(p) for p in roots})
-    if len(unique) != 1:
-        raise RuntimeError(f"DROPBOX_ROOT_AMBIGUOUS_OR_MISSING:{len(unique)}")
-    return Path(unique[0])
 
-
-def git_main_identity() -> tuple[str, str]:
+def git_main_identity(gep_bare: Path) -> tuple[str, str]:
     def g(*args: str) -> str:
-        cp = subprocess.run(["/usr/bin/git", f"--git-dir={GEP_BARE}", *args], capture_output=True, text=True, timeout=15)
+        cp = subprocess.run(["/usr/bin/git", f"--git-dir={gep_bare}", *args], capture_output=True, text=True, timeout=15)
         if cp.returncode:
             raise RuntimeError("GEP_AUTHORITY_UNAVAILABLE")
         return cp.stdout.strip()
@@ -92,20 +75,20 @@ def git_main_identity() -> tuple[str, str]:
     return sha, g("rev-parse", f"{sha}^{{tree}}")
 
 
-def qualified() -> bool:
+def qualified(gep_bare: Path) -> bool:
     try:
-        return git_main_identity() == (QUALIFIED_GEP_SHA, QUALIFIED_GEP_TREE)
+        return git_main_identity(gep_bare) == (QUALIFIED_GEP_SHA, QUALIFIED_GEP_TREE)
     except Exception:
         return False
 
 
-def _run_chm(args: list[str], context: Path | None = None) -> dict[str, Any]:
-    if not CHM.is_file() or not os.access(CHM, os.X_OK):
+def _run_chm(chm: Path, args: list[str], context: Path | None = None) -> dict[str, Any]:
+    if not chm.is_file() or not os.access(chm, os.X_OK):
         raise RuntimeError("CHM_UNAVAILABLE")
     env = os.environ.copy()
     if context is not None:
         env["HANDOFF_MANAGER_CONTEXT_FILE"] = str(context)
-    cp = subprocess.run([str(CHM), *args], capture_output=True, text=True, timeout=20, env=env)
+    cp = subprocess.run([str(chm), *args], capture_output=True, text=True, timeout=20, env=env)
     try:
         value = json.loads(cp.stdout)
     except Exception as exc:
@@ -119,11 +102,11 @@ def _record_name(request_id: str) -> str:
     return f"DGER_R0_{request_id}"
 
 
-def assign_slot(request_id: str) -> str:
+def assign_slot(chm: Path, request_id: str) -> str:
     # R0 is deliberately single-worker, so one dedicated CHM lane is sufficient.
     # CHM assignment is idempotent for the same OPEN slot + immutable record, which
     # recovers the crash window after CHM assignment but before local phase persistence.
-    value = _run_chm(["assign", CHM_SLOT, _record_name(request_id)])
+    value = _run_chm(chm, ["assign", CHM_SLOT, _record_name(request_id)])
     if value.get("ok") and value.get("code") == "HANDOFF_ASSIGNED":
         return CHM_SLOT
     code = value.get("code")
@@ -141,8 +124,8 @@ def context_file(state: Path, request_id: str, capability: str) -> Path:
     return p
 
 
-def transition(slot: str, status: str, ctx: Path) -> dict[str, Any]:
-    value = _run_chm(["status", slot, status], ctx)
+def transition(chm: Path, slot: str, status: str, ctx: Path) -> dict[str, Any]:
+    value = _run_chm(chm, ["status", slot, status], ctx)
     if value.get("ok"):
         return value
     # CHM returns the current target-slot lifecycle state on an invalid transition.
@@ -223,13 +206,13 @@ def find_attempt_process(target: Any) -> tuple[int, str] | None:
     return matches[0] if matches else None
 
 
-def reconstruct_gep(attempt_dir: Path) -> Path:
+def reconstruct_gep(gep_bare: Path, attempt_dir: Path) -> Path:
     tree = attempt_dir / "gep-tree"
     if tree.exists(): shutil.rmtree(tree)
     tree.mkdir(parents=True)
     archive = attempt_dir / "gep.tar"
     with archive.open("wb") as fh:
-        cp = subprocess.run(["/usr/bin/git", f"--git-dir={GEP_BARE}", "archive", "--format=tar", QUALIFIED_GEP_SHA], stdout=fh, stderr=subprocess.PIPE)
+        cp = subprocess.run(["/usr/bin/git", f"--git-dir={gep_bare}", "archive", "--format=tar", QUALIFIED_GEP_SHA], stdout=fh, stderr=subprocess.PIPE)
     if cp.returncode:
         raise RuntimeError("GEP_ARCHIVE_FAILED")
     cp = subprocess.run(["/usr/bin/tar", "-xf", str(archive), "-C", str(tree)], capture_output=True)
@@ -255,20 +238,20 @@ def provision_gep(tree: Path) -> None:
         raise RuntimeError("GEP_CANONICAL_ENVIRONMENT_MISSING")
 
 
-def start_gep(state_root: Path, request_id: str, current: dict[str, Any]) -> dict[str, Any]:
+def start_gep(gep_bare: Path, pyrunway: Path, state_root: Path, request_id: str, current: dict[str, Any]) -> dict[str, Any]:
     attempts = int(current.get("attempts", 0))
     if attempts >= MAX_ATTEMPTS:
         raise RuntimeError("RERUN_LIMIT_EXCEEDED")
     attempt = attempts + 1
     ad = state_root / "attempts" / request_id / f"attempt-{attempt}"
     ad.mkdir(parents=True, exist_ok=True)
-    tree = reconstruct_gep(ad)
+    tree = reconstruct_gep(gep_bare, ad)
     provision_gep(tree)
     stdout_path, stderr_path = ad / "stdout.json", ad / "stderr.log"
     out, err = open(stdout_path, "wb"), open(stderr_path, "wb")
     env = os.environ.copy(); env["PYRUNWAY_STRICT"] = "1"; env["PYTHONDONTWRITEBYTECODE"] = "1"
     target = (tree / "scripts" / "governed_exec.py").resolve(strict=True)
-    cmd = [str(PYRUNWAY), str(target), "self-check", QUALIFIED_PROJECT]
+    cmd = [str(pyrunway), str(target), "self-check", QUALIFIED_PROJECT]
     current.update({"attempts": attempt, "phase": "GEP_STARTING", "attempt_dir": str(ad), "gep_target": str(target), "gep_launch_reserved_utc": utc()})
     current.pop("gep_pid", None); current.pop("gep_process_identity", None)
     save_state(state_root, request_id, current)
@@ -314,10 +297,10 @@ def safe_output_dir(parent: Path, request_id: str) -> Path:
 
 
 class Relay:
-    def __init__(self, root: Path, state_root: Path = DEFAULT_STATE, *, sleep=time.sleep):
+    def __init__(self, root: Path, state_root: Path, *, gep_bare: Path, pyrunway: Path, chm: Path, sleep=time.sleep):
         if root.is_symlink(): raise RuntimeError("UNSAFE_TRANSPORT_ROOT")
         if state_root.is_symlink(): raise RuntimeError("UNSAFE_RELAY_PATH")
-        self.root = root.resolve(); self.state = state_root.resolve(); self.sleep = sleep
+        self.root = root.resolve(); self.state = state_root.resolve(); self.gep_bare = gep_bare; self.pyrunway = pyrunway; self.chm = chm; self.sleep = sleep
         self.ingress, self.runs, self.control = self.root / "Ingress", self.root / "Runs", self.root / "Control"
         self.sequence_file = self.state / "health-sequence"
         for p in (self.ingress, self.runs, self.control, self.state):
@@ -381,7 +364,7 @@ class Relay:
         slot, cap = current.get("chm_slot"), current.get("claim_capability")
         if not isinstance(slot, str) or not isinstance(cap, str): return True
         ctx = context_file(self.state, rid, cap)
-        try: transition(slot, "CLOSED", ctx)
+        try: transition(self.chm, slot, "CLOSED", ctx)
         except Exception as exc: self.status(rid, "RESULT_PUBLISHED_CHM_PENDING", detail=str(exc), chm_slot=slot); return False
         finally:
             try: ctx.unlink()
@@ -395,10 +378,10 @@ class Relay:
             return True
         if not self.validate_package(d): return False
         claim_once(self.state, rid)
-        if not qualified(): self.result(rid, "BLOCKED", "CLASSIFICATION_VOID", qualified_gep_commit=QUALIFIED_GEP_SHA); return True
+        if not qualified(self.gep_bare): self.result(rid, "BLOCKED", "CLASSIFICATION_VOID", qualified_gep_commit=QUALIFIED_GEP_SHA); return True
         if current.get("phase") == "NEW":
             try:
-                slot = assign_slot(rid); cap = secrets.token_urlsafe(48)
+                slot = assign_slot(self.chm, rid); cap = secrets.token_urlsafe(48)
                 current.update({"chm_slot": slot, "claim_capability": cap, "phase": "CHM_ASSIGNED"}); save_state(self.state, rid, current)
             except Exception as exc:
                 self.status(rid, "DEGRADED_CHM_UNAVAILABLE", detail=str(exc)); return False
@@ -406,7 +389,7 @@ class Relay:
             try:
                 slot, cap = current["chm_slot"], current["claim_capability"]
                 ctx = context_file(self.state, rid, cap)
-                try: transition(slot, "STARTED", ctx)
+                try: transition(self.chm, slot, "STARTED", ctx)
                 finally:
                     try: ctx.unlink()
                     except FileNotFoundError: pass
@@ -452,7 +435,7 @@ class Relay:
             if int(current.get("attempts", 0)) >= MAX_ATTEMPTS:
                 self.result(rid, "BLOCKED", "RERUN_LIMIT_EXCEEDED", attempts=current.get("attempts"), chm_slot=current.get("chm_slot")); current["phase"] = "RESULT_PUBLISHED"; save_state(self.state, rid, current); self._finish_chm(rid, current); return True
             try:
-                current = start_gep(self.state, rid, current); self.status(rid, "GEP_RUNNING", attempts=current.get("attempts"), chm_slot=current.get("chm_slot")); return True
+                current = start_gep(self.gep_bare, self.pyrunway, self.state, rid, current); self.status(rid, "GEP_RUNNING", attempts=current.get("attempts"), chm_slot=current.get("chm_slot")); return True
             except Exception as exc:
                 fresh = read_state(self.state, rid)
                 if fresh.get("phase") == "GEP_STARTING":

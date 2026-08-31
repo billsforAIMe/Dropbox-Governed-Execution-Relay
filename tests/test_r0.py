@@ -17,7 +17,7 @@ def publish(root:Path,rid:str,value=None):
 
 class R0Tests(unittest.TestCase):
     def setUp(self):
-        self.t=tempfile.TemporaryDirectory(); self.root=Path(self.t.name)/"transport"; self.state=Path(self.t.name)/"state"; self.r=relay.Relay(self.root,self.state,sleep=lambda _:None)
+        self.t=tempfile.TemporaryDirectory(); self.root=Path(self.t.name)/"transport"; self.state=Path(self.t.name)/"state"; self.gep_bare=Path(self.t.name)/"gep.git"; self.pyrunway=Path(self.t.name)/"pyrunway"; self.chm=Path(self.t.name)/"handoff-manager"; self.r=relay.Relay(self.root,self.state,gep_bare=self.gep_bare,pyrunway=self.pyrunway,chm=self.chm,sleep=lambda _:None)
     def tearDown(self): self.t.cleanup()
     def rid(self,n=1): return f"r0-{n:032x}"
     def test_single_operation_fixed(self):
@@ -36,14 +36,14 @@ class R0Tests(unittest.TestCase):
         rid=self.rid(); a=relay.claim_once(self.state,rid); b=relay.claim_once(self.state,rid); self.assertEqual(a,b); self.assertEqual(rid,json.loads(a.read_text())["request_id"])
     def test_dedicated_chm_slot_assignment(self):
         rid=self.rid(); value={"ok":True,"code":"HANDOFF_ASSIGNED","slot":relay.CHM_SLOT,"changed":False}
-        with mock.patch.object(relay,"_run_chm",return_value=value) as run: self.assertEqual(relay.CHM_SLOT,relay.assign_slot(rid))
-        run.assert_called_once_with(["assign",relay.CHM_SLOT,f"DGER_R0_{rid}"])
+        with mock.patch.object(relay,"_run_chm",return_value=value) as run: self.assertEqual(relay.CHM_SLOT,relay.assign_slot(self.chm,rid))
+        run.assert_called_once_with(self.chm,["assign",relay.CHM_SLOT,f"DGER_R0_{rid}"])
     def test_no_global_active_dependency(self):
         self.assertFalse(hasattr(relay,"_active")); self.assertFalse(hasattr(relay,"find_existing_route"))
     def test_dedicated_slot_busy_fails_closed(self):
         rid=self.rid(); value={"ok":False,"code":"HANDOFF_CONFLICT","status":"STARTED"}
         with mock.patch.object(relay,"_run_chm",return_value=value):
-            with self.assertRaisesRegex(RuntimeError,"CHM_DEDICATED_SLOT_BUSY"): relay.assign_slot(rid)
+            with self.assertRaisesRegex(RuntimeError,"CHM_DEDICATED_SLOT_BUSY"): relay.assign_slot(self.chm,rid)
     def test_chm_unavailable_no_gep(self):
         rid=self.rid(); d=publish(self.root,rid)
         with mock.patch.object(relay,"qualified",return_value=True), mock.patch.object(relay,"assign_slot",side_effect=RuntimeError("down")), mock.patch.object(relay,"start_gep") as start: self.r.process_one(d); start.assert_not_called()
@@ -54,23 +54,23 @@ class R0Tests(unittest.TestCase):
         self.assertEqual("CLASSIFICATION_VOID",json.loads((self.root/"Runs"/rid/"result.json").read_text())["classification"])
     def test_started_recovery_is_target_local(self):
         rid=self.rid(); d=publish(self.root,rid); cur={"request_id":rid,"attempts":0,"phase":"CHM_ASSIGNED","chm_slot":relay.CHM_SLOT,"claim_capability":"secret"}; relay.save_state(self.state,rid,cur)
-        with mock.patch.object(relay,"qualified",return_value=True), mock.patch.object(relay,"transition",return_value={"ok":True,"recovered":True}) as trans, mock.patch.object(relay,"start_gep",side_effect=lambda state,rid,c: c): self.r.process_one(d)
-        self.assertEqual("STARTED",trans.call_args.args[1]); self.assertEqual(relay.CHM_SLOT,trans.call_args.args[0])
+        with mock.patch.object(relay,"qualified",return_value=True), mock.patch.object(relay,"transition",return_value={"ok":True,"recovered":True}) as trans, mock.patch.object(relay,"start_gep",side_effect=lambda gep,pyrun,state,rid,c: c): self.r.process_one(d)
+        self.assertEqual(self.chm,trans.call_args.args[0]); self.assertEqual(relay.CHM_SLOT,trans.call_args.args[1]); self.assertEqual("STARTED",trans.call_args.args[2])
     def test_transition_recovers_already_started(self):
         ctx=self.state/"ctx"; ctx.write_text("{}")
         value={"ok":False,"code":"INVALID_HANDOFF_TRANSITION","status":"STARTED"}
-        with mock.patch.object(relay,"_run_chm",return_value=value): result=relay.transition(relay.CHM_SLOT,"STARTED",ctx)
+        with mock.patch.object(relay,"_run_chm",return_value=value): result=relay.transition(self.chm,relay.CHM_SLOT,"STARTED",ctx)
         self.assertTrue(result["ok"]); self.assertTrue(result["recovered"])
     def test_transition_recovers_already_closed(self):
         ctx=self.state/"ctx2"; ctx.write_text("{}")
         value={"ok":False,"code":"INVALID_HANDOFF_TRANSITION","status":"CLOSED"}
-        with mock.patch.object(relay,"_run_chm",return_value=value): result=relay.transition(relay.CHM_SLOT,"CLOSED",ctx)
+        with mock.patch.object(relay,"_run_chm",return_value=value): result=relay.transition(self.chm,relay.CHM_SLOT,"CLOSED",ctx)
         self.assertTrue(result["ok"]); self.assertTrue(result["recovered"])
     def test_transition_wrong_current_state_fails_closed(self):
         ctx=self.state/"ctx3"; ctx.write_text("{}")
         value={"ok":False,"code":"INVALID_HANDOFF_TRANSITION","status":"OPEN"}
         with mock.patch.object(relay,"_run_chm",return_value=value):
-            with self.assertRaisesRegex(RuntimeError,"CHM_STATUS_FAILED"): relay.transition(relay.CHM_SLOT,"CLOSED",ctx)
+            with self.assertRaisesRegex(RuntimeError,"CHM_STATUS_FAILED"): relay.transition(self.chm,relay.CHM_SLOT,"CLOSED",ctx)
     def test_live_orphan_not_relaunched(self):
         rid=self.rid(); d=publish(self.root,rid); cur={"request_id":rid,"attempts":1,"phase":"GEP_RUNNING","gep_pid":321,"gep_process_identity":"abc","attempt_dir":str(self.state/"attempt")}; relay.save_state(self.state,rid,cur)
         with mock.patch.object(relay,"qualified",return_value=True), mock.patch.object(relay,"read_gep_terminal",return_value=(None,"","")), mock.patch.object(relay,"is_same_live_process",return_value=True), mock.patch.object(relay,"start_gep") as start: self.r.process_one(d); start.assert_not_called()
@@ -91,10 +91,10 @@ class R0Tests(unittest.TestCase):
         proc=mock.Mock(pid=4321)
         cur={"request_id":rid,"attempts":0,"phase":"CHM_STARTED"}
         with mock.patch.object(relay,"reconstruct_gep",return_value=tree.resolve()), mock.patch.object(relay,"provision_gep") as provision, mock.patch.object(relay.subprocess,"Popen",return_value=proc) as popen, mock.patch.object(relay,"process_identity",return_value="proc-id"):
-            result=relay.start_gep(self.state,rid,cur)
+            result=relay.start_gep(self.gep_bare,self.pyrunway,self.state,rid,cur)
         provision.assert_called_once_with(tree.resolve())
         args,kwargs=popen.call_args; cmd=args[0]
-        self.assertEqual(str(relay.PYRUNWAY),cmd[0]); self.assertNotIn("--standalone",cmd); self.assertEqual(str(target.resolve()),cmd[1]); self.assertEqual(["self-check",relay.QUALIFIED_PROJECT],cmd[2:])
+        self.assertEqual(str(self.pyrunway),cmd[0]); self.assertNotIn("--standalone",cmd); self.assertEqual(str(target.resolve()),cmd[1]); self.assertEqual(["self-check",relay.QUALIFIED_PROJECT],cmd[2:])
         self.assertEqual("1",kwargs["env"]["PYRUNWAY_STRICT"]); self.assertEqual(tree.resolve(),kwargs["cwd"]); self.assertTrue(kwargs["start_new_session"]); self.assertEqual(1,result["attempts"])
     def test_terminal_result_write_once(self):
         rid=self.rid(); self.r.result(rid,"SUCCESS","ONE"); self.r.result(rid,"BLOCKED","TWO"); self.assertEqual("ONE",json.loads((self.root/"Runs"/rid/"result.json").read_text())["classification"])
@@ -103,13 +103,13 @@ class R0Tests(unittest.TestCase):
 
     def test_state_root_symlink_rejected_before_resolve(self):
         target=Path(self.t.name)/"real-state"; target.mkdir(); link=Path(self.t.name)/"state-link"; link.symlink_to(target, target_is_directory=True)
-        with self.assertRaisesRegex(RuntimeError,"UNSAFE_RELAY_PATH"): relay.Relay(Path(self.t.name)/"transport2",link,sleep=lambda _:None)
+        with self.assertRaisesRegex(RuntimeError,"UNSAFE_RELAY_PATH"): relay.Relay(Path(self.t.name)/"transport2",link,gep_bare=self.gep_bare,pyrunway=self.pyrunway,chm=self.chm,sleep=lambda _:None)
     def test_launch_reservation_persisted_before_child_identity(self):
         rid=self.rid(40); ad=self.state/"fake-attempt"; tree=ad/"gep-tree"; (tree/"scripts").mkdir(parents=True); (tree/"scripts"/"governed_exec.py").write_text("# fake\n")
         cur={"request_id":rid,"attempts":0,"phase":"CHM_STARTED"}; relay.save_state(self.state,rid,cur)
         fake=mock.Mock(pid=4321)
         with mock.patch.object(relay,"reconstruct_gep",return_value=tree), mock.patch.object(relay,"provision_gep"), mock.patch.object(relay.subprocess,"Popen",return_value=fake) as popen, mock.patch.object(relay,"process_identity",side_effect=SystemExit("simulated relay crash after Popen")):
-            with self.assertRaises(SystemExit): relay.start_gep(self.state,rid,cur)
+            with self.assertRaises(SystemExit): relay.start_gep(self.gep_bare,self.pyrunway,self.state,rid,cur)
         saved=relay.read_state(self.state,rid)
         self.assertEqual("GEP_STARTING",saved["phase"]); self.assertEqual(1,saved["attempts"]); self.assertTrue(saved["gep_target"].endswith("/scripts/governed_exec.py")); popen.assert_called_once()
     def test_starting_crash_window_adopts_without_relaunch(self):
@@ -124,5 +124,20 @@ class R0Tests(unittest.TestCase):
         with mock.patch.object(relay,"qualified",return_value=True), mock.patch.object(relay,"read_gep_terminal",return_value=(None,"","")), mock.patch.object(relay,"find_attempt_process",return_value=None), mock.patch.object(relay,"start_gep") as start, mock.patch.object(self.r,"_finish_chm",return_value=True):
             self.r.process_one(d); start.assert_not_called()
         result=json.loads((self.root/"Runs"/rid/"result.json").read_text()); self.assertEqual("RERUN_LIMIT_EXCEEDED",result["classification"]); self.assertEqual(2,result["attempts"])
+
+    def test_gep_git_binding_is_explicit(self):
+        main=mock.Mock(returncode=0,stdout=relay.QUALIFIED_GEP_SHA+"\n",stderr="")
+        tree=mock.Mock(returncode=0,stdout=relay.QUALIFIED_GEP_TREE+"\n",stderr="")
+        with mock.patch.object(relay.subprocess,"run",side_effect=[main,tree]) as run:
+            self.assertEqual((relay.QUALIFIED_GEP_SHA,relay.QUALIFIED_GEP_TREE),relay.git_main_identity(self.gep_bare))
+        self.assertIn(f"--git-dir={self.gep_bare}",run.call_args_list[0].args[0])
+
+    def test_chm_executable_binding_is_explicit(self):
+        self.chm.write_text("#!/bin/sh\n"); self.chm.chmod(0o755)
+        completed=mock.Mock(returncode=0,stdout='{"ok":true}\n',stderr="")
+        with mock.patch.object(relay.subprocess,"run",return_value=completed) as run:
+            self.assertTrue(relay._run_chm(self.chm,["assign","Handoff100","x"])["ok"])
+        self.assertEqual(str(self.chm),run.call_args.args[0][0])
+
 
 if __name__=="__main__": unittest.main(verbosity=2)
