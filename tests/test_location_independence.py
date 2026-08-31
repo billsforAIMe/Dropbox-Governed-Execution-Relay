@@ -33,6 +33,12 @@ class LocationIndependenceTests(unittest.TestCase):
         self.assertIn('DROPBOX_ROOT_COUNT=$((DROPBOX_ROOT_COUNT + 1))', text)
         self.assertIn('DGER_DROPBOX_ROOT_AMBIGUOUS_OR_MISSING', text)
 
+    def test_launchagent_invokes_god_managed_runtime_launcher(self):
+        text = (ROOT / "launchagent/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist").read_text()
+        expected = "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay/runtime/current/launcher/dropbox-governed-execution-relay"
+        self.assertIn(f"<string>{expected}</string>", text)
+        self.assertNotIn("<string>/usr/local/bin/dropbox-governed-execution-relay</string>", text)
+
     def test_entrypoint_requires_every_external_binding(self):
         spec = importlib.util.spec_from_file_location("dger_entrypoint_test", ROOT / "scripts" / "dger.py")
         self.assertIsNotNone(spec)
