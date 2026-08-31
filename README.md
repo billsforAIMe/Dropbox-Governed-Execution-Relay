@@ -12,7 +12,7 @@ Prototype R0 uses one dedicated CHM lane, `Handoff100`, because the relay is sin
 
 ## Location-independent runtime binding
 
-DGER source does not encode a development checkout. The installed Mac launcher supplies the host-specific DGER State root, DGER/GEP Git authorities, PyRunway, CHM, and Dropbox transport root explicitly to `scripts/dger.py`. The relay core accepts those bindings as paths and preserves the R0 protocol/allowlist semantics. Moving or deleting a development checkout therefore does not change runtime resolution.
+DGER source does not encode a development checkout. The installed Mac launcher supplies the host-specific DGER State root, qualified GEP Git/material binding, PyRunway, CHM, and Dropbox transport root explicitly to `scripts/dger.py`. The relay core accepts those bindings as paths and preserves the R0 protocol/allowlist semantics. Moving or deleting a development checkout therefore does not change runtime resolution.
 
 The service is Mac-bound in operation; cloud/Linux is a development and falsification surface for the portable relay core, not a simulated Mac service.
 
