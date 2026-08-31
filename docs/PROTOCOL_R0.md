@@ -29,4 +29,4 @@ The configured DGER State root is rejected if it is a symlink **before** `Path.r
 
 ## Host binding boundary
 
-The installed Mac adapter supplies DGER State, DGER authoritative Git, qualified GEP Git, PyRunway, CHM, and the Dropbox transport root as explicit entrypoint arguments. These are host resources, not development-source locations. The relay implementation does not locate them through caller `cwd`, sibling checkouts, `PYTHONPATH`, editable installs, or a development source root.
+The installed Mac adapter supplies DGER State, qualified GEP Git/material, PyRunway, CHM, and the Dropbox transport root as explicit entrypoint arguments. These are host resources, not development-source locations. DGER's own source Git is not a resident-runtime input. The relay implementation does not locate host resources through caller `cwd`, sibling checkouts, `PYTHONPATH`, editable installs, or a development source root.
