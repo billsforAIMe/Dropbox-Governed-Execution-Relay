@@ -1,19 +1,44 @@
-# Dropbox Governed Execution Relay — Prototype R0
+# Dropbox Governed Execution Relay — Generation 3
 
-Prototype R0 proves a zero-Owner-courier loop from Chat-authored Dropbox request to a resident Mac relay, CHM ownership, one fixed GEP `platform.self_check` operation, and Dropbox result.
+DGER is the governed transport/reconciliation relay between immutable cloud execution requests and Mac Operation Host (MOH), with durable completion publication through Common Handoff Manager (CHM).
 
-Hard qualification: GEP bare `main` must remain `fe088a93eee537dbe7f8857aec85303f151cbb63`; otherwise requests fail closed as `CLASSIFICATION_VOID` until requalified.
+Generation 3 removes Prototype R0's singleton assumptions. Each accepted `execution_id` owns independent immutable request, payload, frozen provider bindings, MOH stage/reconciliation state, result evidence, and CHM publication state. The installed service may serialize work; accepted executions are not globally exhausted after any fixed number of calls.
 
-The only request project/operation pair is `ai-me` / `platform.self_check`. The GEP operation accepts no arguments.
+## Authority and boundary model
 
-Prototype R0 reconstructs the exact qualified GEP commit for every attempt, provisions its locked offline `.venv`, and invokes the fixed self-check through project-canonical strict PyRunway. Standalone PyRunway is used for the installed DGER launcher itself, not for GEP's governed CLI.
+- **Tool software authority:** DGER's authoritative GitHub `refs/heads/main`.
+- **MOH:** durable host execution truth and the no-blind-repeat invariant.
+- **DGER:** immutable transport, exact-binding freeze, relay state, and reconciliation.
+- **CHM:** logical handoff/result/history truth.
+- **GTG/GTC:** semantic provider discovery, callability/currentness checks, and invocation routing.
+- **Dropbox:** transport only; never software authority or execution truth.
 
-Prototype R0 uses one dedicated CHM lane, `Handoff100`, because the relay is single-worker. It uses target-local CHM `assign/status` only and never depends on global `handoff-manager active`; a busy or unsafe dedicated lane produces visible degraded state and no GEP invocation.
+DGER never accepts caller-selected shell, argv, cwd, interpreter, environment, network mechanics, or retry policy. It preserves the upstream MOH envelope bytes and payload digest and invokes only the semantic operations already registered for MOH/CHM.
 
-## Location-independent runtime binding
+## Current dependency gate
 
-DGER source does not encode a development checkout. The installed Mac launcher supplies the host-specific DGER State root, qualified GEP Git/material binding, PyRunway, CHM, and Dropbox transport root explicitly to `scripts/dger.py`. The relay core accepts those bindings as paths and preserves the R0 protocol/allowlist semantics. Moving or deleting a development checkout therefore does not change runtime resolution.
+New executions are accepted for host work only when GTG Doctor reports the required current semantic operations as callable and returns exact authoritative/delivered bindings for:
 
-The service is Mac-bound in operation; cloud/Linux is a development and falsification surface for the portable relay core, not a simulated Mac service.
+- `mac-operation-host`: `execute`, `status`;
+- `common-handoff-manager`: `handoff_get`, `handoff_attach_result`, `handoff_resolve`;
+- the consumer Tool/operation named by the immutable MOH envelope.
 
-DGER's own Git authority is a development/governance concern, not a runtime dependency. The installed launcher verifies the GOD-delivered `delivered-identity.json` and runtime root, but does not require the retired Mac DGER bare repository to exist. This allows DGER source authority to move to an eligible GitStorage-backed hosted location while the Mac service continues to use its delivered runtime and explicit host bindings.
+Before any MOH-visible stage exists, DGER also requires `handoff_get` to return the supplied logical handoff in `STARTED` state with no prior result. CHM derives project authority from DGER's authenticated GTG transport binding; ingress cannot select a project or credential. Those exact identities are then frozen in DGER State at acceptance. Before each later effect call, DGER rechecks that the same frozen provider identity is still the current callable route. Provider advancement therefore pauses recovery rather than silently switching an accepted execution to a newer release. Once MOH has reported `IN_DOUBT`, DGER also permanently bars any later `execute` for that execution ID, including if a subsequent status lookup returns `NOT_FOUND`.
+
+Authoritative CHM Generation 8 does not yet expose the required durable logical-result operations. Until CHM publishes them on authoritative `main` and GTG/Registry activation reflects that release, Generation-3 DGER correctly fails closed before Mac execution. No unpublished CHM candidate is treated as authority.
+
+## Protocol
+
+See `docs/PROTOCOL_V1.md`. Prototype R0 remains in `src/dger/relay.py` for historical regression coverage; the installed entry point uses `src/dger/relay_v1.py`.
+
+## Runtime binding
+
+The portable relay core contains no Owner checkout paths. The installed Mac launcher supplies:
+
+- DGER State root;
+- Dropbox transport root;
+- MOH home;
+- GTG endpoint and private bearer-token file;
+- governed PyRunway.
+
+The GTG endpoint/token/MOH binding is deployment state, not caller input and not software identity. The service remains Mac-bound in operation while the relay core and crash/concurrency protocol are portable for cloud falsification.

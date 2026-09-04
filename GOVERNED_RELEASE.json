@@ -14,7 +14,7 @@
     ],
     "release_generation": {
       "max": null,
-      "min": 7
+      "min": 11
     },
     "required_capabilities": [
       "authority-channel-binding-v2",
@@ -22,12 +22,18 @@
       "explicit-tool-runtime-compatibility-v2",
       "act-time-release-withdrawal-v2",
       "single-registered-git-authority-v1",
-      "actual-threat-model-materiality-v1"
+      "actual-threat-model-materiality-v1",
+      "change-driven-semantic-review-v1",
+      "complete-derived-governance-v1",
+      "portable-contract-discovery-v1",
+      "normal-semantic-tool-access-v1"
     ]
   },
   "manifest_schema_major": 1,
-  "normative_files": [],
-  "release_generation": 2,
+  "normative_files": [
+    "docs/PROTOCOL_V1.md"
+  ],
+  "release_generation": 3,
   "release_selector_contract": {
     "ancestry_preserving_forward_cas": true,
     "delivered_objects_remain_reachable": true,
@@ -37,10 +43,10 @@
   "rolls_back_to_generation": null,
   "runtime_compatibility": {
     "compatible_runtime_commits": [],
-    "note": "This release changes the runtime external-binding interface; no earlier installed runtime is declared compatible.",
+    "note": "Generation 3 replaces Prototype R0 singleton/GEP/CHM bindings with MOH plus logical-CHM semantic integration; no earlier installed runtime is declared compatible.",
     "policy": "exact_or_explicit_immutable_tool_release_declaration"
   },
-  "supersedes_generation": 1,
+  "supersedes_generation": 2,
   "tool_id": "dropbox-governed-execution-relay",
   "withdrawn_generations": []
 }
