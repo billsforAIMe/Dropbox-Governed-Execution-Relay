@@ -23,6 +23,7 @@ from dger.relay_v1 import (
 COMMIT = "a" * 40
 TREE = "b" * 40
 REGISTRY = "c" * 40
+GTG_COMMIT = "9" * 40
 CONSUMER = "fixture-consumer"
 CONSUMER_REPO = "424242"
 MOH_COMMIT = "d" * 40
@@ -94,11 +95,28 @@ class FakeGatewayCore:
             "reason": "ready",
         }
 
-    def _inv(self, result: dict) -> dict:
+    def _inv(self, tool_id: str, result: dict) -> dict:
         with self.lock:
             self.invocations += 1
             inv = f"inv_{self.invocations:032x}"
-        return {"code": "INVOKE_TOOL_OK", "ok": True, "invocation_id": inv, "status": "completed", "result": result}
+        delivered = self.bindings[(tool_id, "*")]["delivered_binding"]
+        return {
+            "code": "INVOKE_TOOL_OK",
+            "ok": True,
+            "invocation_id": inv,
+            "status": "completed",
+            "result": result,
+            "identity_attestation": {
+                "tool_identity": delivered["tool_identity"],
+                "tool_tree": delivered["tool_tree"],
+                "gtg_identity": GTG_COMMIT,
+            },
+            "evidence": {
+                "tool_id": tool_id,
+                "tool_identity": delivered["tool_identity"],
+                "registry_identity": delivered["registry_identity"],
+            },
+        }
 
     def _moh_response(self, execution_id: str, state: str) -> dict:
         base = {
