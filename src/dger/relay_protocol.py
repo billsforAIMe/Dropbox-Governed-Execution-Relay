@@ -13,6 +13,6 @@ from .relay_protocol_fs import (
     payload_manifest, read_json_regular, read_regular,
 )
 from .relay_protocol_validate import (
-    _binding_projection, _intent_digest, _validate_consumer_binding, _validate_ready, _validate_request,
+    _binding_projection, _intent_digest, _invocation_attestation, _validate_consumer_binding, _validate_ready, _validate_request,
     resolve_tool_binding, validate_moh_envelope,
 )

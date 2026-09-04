@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import uuid
 from typing import Any
@@ -16,6 +17,7 @@ class GTGHttpError(RuntimeError):
 
 MAX_GTG_RESPONSE_BYTES = 1024 * 1024
 MAX_TOKEN_BYTES = 4096
+_HEX40 = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _read_secret(path: Path) -> str:
@@ -44,6 +46,29 @@ def _read_secret(path: Path) -> str:
     if len(value) < 32:
         raise GTGHttpError("GTG_TOKEN_INVALID")
     return value
+
+
+def _require_success_attestation(value: dict[str, Any], tool_id: str) -> None:
+    if value.get("ok") is not True:
+        return
+    invocation_id = value.get("invocation_id")
+    if not isinstance(invocation_id, str) or re.fullmatch(r"inv_[0-9a-f]{32}", invocation_id) is None:
+        raise GTGHttpError("GTG_INVOCATION_ID_INVALID")
+    attestation = value.get("identity_attestation")
+    if not isinstance(attestation, dict) or set(attestation) != {"tool_identity", "tool_tree", "gtg_identity"}:
+        raise GTGHttpError("GTG_IDENTITY_ATTESTATION_REQUIRED")
+    for key in ("tool_identity", "tool_tree", "gtg_identity"):
+        observed = attestation.get(key)
+        if not isinstance(observed, str) or _HEX40.fullmatch(observed) is None:
+            raise GTGHttpError("GTG_IDENTITY_ATTESTATION_INVALID")
+    evidence = value.get("evidence")
+    if not isinstance(evidence, dict) or evidence.get("tool_id") != tool_id:
+        raise GTGHttpError("GTG_INVOCATION_EVIDENCE_INVALID")
+    if evidence.get("tool_identity") != attestation["tool_identity"]:
+        raise GTGHttpError("GTG_INVOCATION_EVIDENCE_INVALID")
+    registry_identity = evidence.get("registry_identity")
+    if not isinstance(registry_identity, str) or _HEX40.fullmatch(registry_identity) is None:
+        raise GTGHttpError("GTG_INVOCATION_EVIDENCE_INVALID")
 
 
 class GTGHttpGateway:
@@ -106,7 +131,10 @@ class GTGHttpGateway:
         if isinstance(content, list) and content and isinstance(content[0], dict):
             text = content[0].get("text")
             if isinstance(text, str):
-                parsed_text = json.loads(text)
+                try:
+                    parsed_text = json.loads(text)
+                except json.JSONDecodeError as exc:
+                    raise GTGHttpError("GTG_RESULT_UNSTRUCTURED") from exc
                 if isinstance(parsed_text, dict):
                     return parsed_text
         raise GTGHttpError("GTG_RESULT_UNSTRUCTURED")
@@ -115,21 +143,9 @@ class GTGHttpGateway:
         return self._call("doctor", {"environment": "current", "tool_id": tool_id, "operation": operation})
 
     def invoke(self, tool_id: str, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        return self._call("invoke_tool", {"tool_id": tool_id, "operation": operation, "arguments": arguments})
-
-    def invoke_frozen(
-        self,
-        tool_id: str,
-        operation: str,
-        arguments: dict[str, Any],
-        frozen_binding: dict[str, Any],
-    ) -> dict[str, Any]:
-        # Current authoritative GTG has no atomic expected-provider identity/CAS
-        # argument on invoke_tool. Do not emulate that with Doctor -> invoke; the
-        # gap is a real activation dependency. A future adapter may implement this
-        # method only against an authoritative GTG contract that performs the
-        # binding comparison atomically with route selection and dispatch.
-        raise GTGHttpError("GTG_ATOMIC_BINDING_CAS_UNAVAILABLE")
+        value = self._call("invoke_tool", {"tool_id": tool_id, "operation": operation, "arguments": arguments})
+        _require_success_attestation(value, tool_id)
+        return value
 
     def get_invocation(self, invocation_id: str) -> dict[str, Any]:
         return self._call("get_invocation", {"invocation_id": invocation_id})

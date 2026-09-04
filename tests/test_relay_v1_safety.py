@@ -39,6 +39,7 @@ class RelayV1SafetyTests(RelayV1TestBase):
         self.assertNotIn("diagnostic bytes", json.dumps(result))
         self.assertEqual(result["moh_execution"]["stdout"]["total_bytes"], 10_000_000)
         self.assertEqual(result["moh_execution"]["stdout"]["evidence_ref"], "moh/evidence/stdout")
+        self.assertEqual(result["moh_provider_evidence"]["execute_invocation_attestation"]["tool_identity"], MOH_COMMIT)
         chm = self.gateway.chm_results[handoff_for(eid)]
         self.assertEqual(chm["bounded_result_reference"], f"Runs/{eid}/result.json")
         self.assertNotIn("stdout", chm)
@@ -56,18 +57,25 @@ class RelayV1SafetyTests(RelayV1TestBase):
         self.relay.process_one(p)
         self.assertNotIn("symlink", self.gateway.execute_calls)
 
-    def test_16_provider_advance_after_acceptance_pauses_without_using_new_binding(self):
+    def test_16_provider_advance_after_acceptance_is_attested_without_reexecute(self):
         eid = "provider-advance"
         self.gateway.running_status_cycles[eid] = 2
         p = write_package(self.transport, eid)
         self.relay.process_one(p)
         self.assertEqual(self.gateway.execute_calls[eid], 1)
-        original = self.gateway.bindings[(MOH_TOOL_ID, "*")]
+        self.assertEqual(self.state_for(eid)["moh_execute_attestation"]["tool_identity"], MOH_COMMIT)
+
         self.gateway.bindings[(MOH_TOOL_ID, "*")] = make_binding(MOH_TOOL_ID, "6" * 40, "7" * 40, "100")
         self.relay.process_one(p)
-        self.assertEqual(self.gateway.status_calls.get(eid, 0), 0)
-        self.assertEqual(self.state_for(eid)["phase"], "MOH_RECONCILE")
-        self.gateway.bindings[(MOH_TOOL_ID, "*")] = original
-        self.relay.process_one(p); self.relay.process_one(p)
+        state = self.state_for(eid)
+        self.assertEqual(self.gateway.status_calls.get(eid, 0), 1)
+        self.assertEqual(state["phase"], "MOH_RECONCILE")
+        self.assertEqual(state["moh_status_attestation"]["tool_identity"], "6" * 40)
         self.assertEqual(self.gateway.execute_calls[eid], 1)
-        self.assertEqual(self.state_for(eid)["phase"], "DONE")
+
+        self.relay.process_one(p)
+        state = self.state_for(eid)
+        self.assertEqual(state["phase"], "DONE")
+        self.assertEqual(self.gateway.execute_calls[eid], 1)
+        self.assertEqual(state["moh_terminal_attestation"]["tool_identity"], "6" * 40)
+        self.assertEqual(state["moh_terminal_observed_via"], "status")
