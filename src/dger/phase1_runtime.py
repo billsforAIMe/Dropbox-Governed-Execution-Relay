@@ -80,13 +80,17 @@ class CHMCLI:
         return active
 
     def acquire_capacity(self, execution_id: str) -> dict[str, Any]:
-        return self._call(["execution", "acquire", "ai-me", execution_id, self.principal])
+        return self._call(["execution", "acquire-once", "ai-me", execution_id, self.principal])
 
     def bind_capacity(self, handoff_id: str, execution_id: str, slot: str, allocation_id: str) -> dict[str, Any]:
         return self._call(["execution-handoff", "bind-slot", handoff_id, execution_id, slot, allocation_id])
 
     def capacity_status(self, slot: str, allocation_id: str, status: str) -> dict[str, Any]:
         return self._call(["execution", "status", slot, allocation_id, status])
+
+    def publish_uncertain(self, handoff_id: str, proof: dict[str, Any]) -> dict[str, Any]:
+        with _temp_json(proof) as path:
+            return self._call(["execution-handoff", "publish-uncertain", handoff_id, str(path)])
 
     def publish_terminal(self, handoff_id: str, proof: dict[str, Any]) -> dict[str, Any]:
         with _temp_json(proof) as path:
