@@ -1,0 +1,165 @@
+#!/bin/bash -p
+# pyrunway - governed Python execution for canonical projects and explicit standalone utilities.
+# Trust bootstrap: fixed Bash path + privileged mode (suppresses BASH_ENV/function imports),
+# then controlled utility PATH before any external utility lookup.
+PATH=/usr/bin:/bin
+export PATH
+IFS=$' \t\n'
+unset BASH_ENV ENV CDPATH GLOBIGNORE 2>/dev/null || true
+set -euo pipefail
+
+TOKEN="PYRUNWAY_ENVIRONMENT_UNAVAILABLE"
+EX_UNAVAILABLE=69
+STANDALONE_USAGE_TOKEN="PYRUNWAY_STANDALONE_USAGE"
+EX_USAGE=64
+PYRUNWAY_VERSION="1.2"
+PYRUNWAY_RELEASE_ID="1.3.1"
+EXPECTED_CONTRACT_SHA256="7695601e69633a865d3e711d9c0b2ad3534372b185c797a96704d2e7f512823a"
+EXPECTED_DESCRIBE_SHA256="3cac6569f0ed27b1bf98c551f3a155091a20fcc3302ea3c9680f10cce3c6aed2"
+
+fail() { printf '%s\n' "$TOKEN" >&2; exit "$EX_UNAVAILABLE"; }
+standalone_usage() { printf '%s\n' "$STANDALONE_USAGE_TOKEN" >&2; exit "$EX_USAGE"; }
+
+sha256_file() {
+  local f="$1"
+  if [ -x /usr/bin/sha256sum ]; then /usr/bin/sha256sum "$f" | /usr/bin/awk '{print $1}'
+  elif [ -x /usr/bin/shasum ]; then /usr/bin/shasum -a 256 "$f" | /usr/bin/awk '{print $1}'
+  else return 1; fi
+}
+
+safe_standalone_target() {
+  local supplied="$1" current rest part
+  local -a parts
+  case "$supplied" in *$'\n'*|*$'\r'*) return 1 ;; esac
+  case "$supplied" in /*) current="/"; rest="${supplied#/}" ;; *) current="$(pwd -P)"; rest="$supplied" ;; esac
+  IFS='/' read -r -a parts <<< "$rest"
+  for part in "${parts[@]}"; do
+    [ -n "$part" ] || continue
+    case "$part" in .) continue ;; ..) current="$(/usr/bin/dirname "$current")"; continue ;; esac
+    if [ "$current" = "/" ]; then current="/$part"; else current="$current/$part"; fi
+    [ ! -L "$current" ] || return 1
+  done
+  [ -f "$supplied" ] && [ ! -L "$supplied" ]
+}
+
+# Runtime binding is resolved relative to this installed launcher, not source checkout location.
+self="${BASH_SOURCE[0]}"
+[ -n "$self" ] && [ -f "$self" ] && [ ! -L "$self" ] || fail
+case "$self" in /*) ;; *) self="$(pwd -P)/$self" ;; esac
+bin_dir="$(cd -P "$(/usr/bin/dirname "$self")" 2>/dev/null && pwd -P)" || fail
+prefix="$(/usr/bin/dirname "$bin_dir")"
+release_dir="$prefix/lib/pyrunway/releases/$PYRUNWAY_RELEASE_ID"
+contract="$release_dir/pyrunway-contract.json"
+describe="$release_dir/pyrunway-describe-v1.json"
+binding="$release_dir/runtime-binding.conf"
+
+[ -d "$release_dir" ] && [ ! -L "$release_dir" ] || fail
+[ -f "$contract" ] && [ ! -L "$contract" ] || fail
+[ "$(sha256_file "$contract" 2>/dev/null || true)" = "$EXPECTED_CONTRACT_SHA256" ] || fail
+[ -f "$describe" ] && [ ! -L "$describe" ] || fail
+[ "$(sha256_file "$describe" 2>/dev/null || true)" = "$EXPECTED_DESCRIBE_SHA256" ] || fail
+[ -f "$binding" ] && [ ! -L "$binding" ] || fail
+
+binding_schema=""; binding_release=""; binding_contract_sha=""; binding_describe_sha=""
+bash_path=""; bash_sha=""; uv=""; uv_sha=""; uv_version=""; standalone_python=""; standalone_python_sha=""
+seen_schema=0; seen_release=0; seen_contract=0; seen_describe=0; seen_bash=0; seen_bash_sha=0
+seen_uv=0; seen_uv_sha=0; seen_uv_version=0; seen_python=0; seen_python_sha=0
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in
+    *$'\r'*|*$'\t'*) fail ;;
+    schema=*) [ "$seen_schema" -eq 0 ] || fail; binding_schema="${line#schema=}"; seen_schema=1 ;;
+    release_id=*) [ "$seen_release" -eq 0 ] || fail; binding_release="${line#release_id=}"; seen_release=1 ;;
+    contract_sha256=*) [ "$seen_contract" -eq 0 ] || fail; binding_contract_sha="${line#contract_sha256=}"; seen_contract=1 ;;
+    describe_sha256=*) [ "$seen_describe" -eq 0 ] || fail; binding_describe_sha="${line#describe_sha256=}"; seen_describe=1 ;;
+    bash_path=*) [ "$seen_bash" -eq 0 ] || fail; bash_path="${line#bash_path=}"; seen_bash=1 ;;
+    bash_sha256=*) [ "$seen_bash_sha" -eq 0 ] || fail; bash_sha="${line#bash_sha256=}"; seen_bash_sha=1 ;;
+    uv_path=*) [ "$seen_uv" -eq 0 ] || fail; uv="${line#uv_path=}"; seen_uv=1 ;;
+    uv_sha256=*) [ "$seen_uv_sha" -eq 0 ] || fail; uv_sha="${line#uv_sha256=}"; seen_uv_sha=1 ;;
+    uv_version=*) [ "$seen_uv_version" -eq 0 ] || fail; uv_version="${line#uv_version=}"; seen_uv_version=1 ;;
+    standalone_python_path=*) [ "$seen_python" -eq 0 ] || fail; standalone_python="${line#standalone_python_path=}"; seen_python=1 ;;
+    standalone_python_sha256=*) [ "$seen_python_sha" -eq 0 ] || fail; standalone_python_sha="${line#standalone_python_sha256=}"; seen_python_sha=1 ;;
+    *) fail ;;
+  esac
+done < "$binding"
+[ "$seen_schema$seen_release$seen_contract$seen_describe$seen_bash$seen_bash_sha$seen_uv$seen_uv_sha$seen_uv_version$seen_python$seen_python_sha" = "11111111111" ] || fail
+[ "$binding_schema" = "pyrunway-runtime-binding/v1" ] || fail
+[ "$binding_release" = "$PYRUNWAY_RELEASE_ID" ] || fail
+[ "$binding_contract_sha" = "$EXPECTED_CONTRACT_SHA256" ] || fail
+[ "$binding_describe_sha" = "$EXPECTED_DESCRIBE_SHA256" ] || fail
+[ "$bash_path" = "/bin/bash" ] || fail
+[ -f "$bash_path" ] && [ ! -L "$bash_path" ] && [ -x "$bash_path" ] || fail
+[ "$(sha256_file "$bash_path" 2>/dev/null || true)" = "$bash_sha" ] || fail
+case "$uv" in /*) ;; *) fail ;; esac
+case "$standalone_python" in /*) ;; *) fail ;; esac
+[ -f "$uv" ] && [ ! -L "$uv" ] && [ -x "$uv" ] || fail
+[ "$(sha256_file "$uv" 2>/dev/null || true)" = "$uv_sha" ] || fail
+[ -f "$standalone_python" ] && [ ! -L "$standalone_python" ] && [ -x "$standalone_python" ] || fail
+[ "$(sha256_file "$standalone_python" 2>/dev/null || true)" = "$standalone_python_sha" ] || fail
+
+if [ "${1:-}" = "--describe" ]; then
+  [ "$#" -eq 1 ] || standalone_usage
+  /bin/cat "$describe"
+  exit 0
+fi
+if [ "${1:-}" = "--contract" ]; then
+  [ "$#" -eq 1 ] || standalone_usage
+  /bin/cat "$contract"
+  exit 0
+fi
+if [ "${1:-}" = "--standalone" ]; then
+  shift
+  [ "$#" -ge 1 ] || standalone_usage
+  target="$1"; shift
+  case "$target" in *.py) ;; *) standalone_usage ;; esac
+  safe_standalone_target "$target" || standalone_usage
+  exec /usr/bin/env \
+    -u VIRTUAL_ENV -u VIRTUAL_ENV_PROMPT -u CONDA_PREFIX -u CONDA_DEFAULT_ENV \
+    -u PYTHONHOME -u PYTHONPATH -u UV_PROJECT -u UV_PROJECT_ENVIRONMENT \
+    -u UV_WORKING_DIR -u UV_WORKING_DIRECTORY -u UV_NO_PROJECT -u UV_PYTHON \
+    -u UV_PYTHON_PREFERENCE -u UV_SYSTEM_PYTHON -u UV_MANAGED_PYTHON -u UV_NO_MANAGED_PYTHON \
+    -u BASH_ENV -u ENV \
+    "$uv" run --isolated --no-project --no-config --offline --no-python-downloads \
+    --python "$standalone_python" -- python -- "$target" "$@"
+fi
+
+project_root="$(pwd -P)"
+while :; do
+  [ ! -L "$project_root/pyproject.toml" ] || fail
+  [ -f "$project_root/pyproject.toml" ] && break
+  [ "$project_root" != "/" ] || fail
+  project_root="$(/usr/bin/dirname "$project_root")"
+done
+env_dir="$project_root/.venv"
+[ -d "$env_dir" ] && [ ! -L "$env_dir" ] || fail
+[ -d "$env_dir/bin" ] && [ ! -L "$env_dir/bin" ] || fail
+probe="$(/bin/cat <<'PYRUNWAY_PROBE'
+import os
+import sys
+expected = os.path.abspath(os.environ.get("PYRUNWAY_EXPECTED_ENV", ""))
+executable = os.path.abspath(sys.executable)
+try:
+    inside = bool(expected) and executable != expected and os.path.commonpath((expected, executable)) == expected
+except (OSError, ValueError):
+    inside = False
+if not inside:
+    raise SystemExit(69)
+PYRUNWAY_PROBE
+)"
+common_env=(
+  -u VIRTUAL_ENV -u VIRTUAL_ENV_PROMPT -u CONDA_PREFIX -u CONDA_DEFAULT_ENV
+  -u PYTHONHOME -u PYTHONPATH -u UV_PROJECT -u UV_PROJECT_ENVIRONMENT
+  -u UV_WORKING_DIR -u UV_WORKING_DIRECTORY -u UV_NO_PROJECT -u UV_PYTHON
+  -u UV_PYTHON_PREFERENCE -u UV_SYSTEM_PYTHON -u UV_MANAGED_PYTHON -u UV_NO_MANAGED_PYTHON
+  -u BASH_ENV -u ENV
+  UV_PROJECT="$project_root" UV_PROJECT_ENVIRONMENT="$env_dir" PYRUNWAY_EXPECTED_ENV="$env_dir"
+)
+if [ "${PYRUNWAY_STRICT:-0}" = "1" ]; then
+  if /usr/bin/env "${common_env[@]}" "$uv" run --project "$project_root" --directory "$project_root" \
+      --no-sync --offline --no-python-downloads -- python -c "$probe" >/dev/null 2>&1; then :; else fail; fi
+  exec /usr/bin/env "${common_env[@]}" "$uv" run --project "$project_root" --directory "$project_root" \
+    --no-sync --offline --no-python-downloads -- python "$@"
+else
+  if /usr/bin/env "${common_env[@]}" "$uv" run --project "$project_root" --directory "$project_root" \
+      -- python -c "$probe" >/dev/null 2>&1; then :; else fail; fi
+  exec /usr/bin/env "${common_env[@]}" "$uv" run --project "$project_root" --directory "$project_root" -- python "$@"
+fi

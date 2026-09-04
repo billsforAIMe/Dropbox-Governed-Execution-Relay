@@ -1,0 +1,46 @@
+name: Gen3 Governed Assurance
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  governed-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Bind assurance to exact PR head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - name: Verify exact governed PyRunway source bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(sha256sum .ci/pyrunway/installers/install.sh | awk '{print $1}')" = "c2d83b30c2e13ffea56a59e50e71ba6f3f75a5c11e7c600338906c49e69e0e00"
+          test "$(sha256sum .ci/pyrunway/launcher/pyrunway | awk '{print $1}')" = "b2942061c6634001d2ffe9bcd66790e45c08bc0091b2f1c5bce530aa0f5a9883"
+          test "$(sha256sum .ci/pyrunway/contract/pyrunway-contract.json | awk '{print $1}')" = "7695601e69633a865d3e711d9c0b2ad3534372b185c797a96704d2e7f512823a"
+          test "$(sha256sum .ci/pyrunway/contract/pyrunway-describe-v1.json | awk '{print $1}')" = "3cac6569f0ed27b1bf98c551f3a155091a20fcc3302ea3c9680f10cce3c6aed2"
+      - name: Bind exact governed PyRunway
+        shell: bash
+        run: |
+          set -euo pipefail
+          UV="$(command -v uv || true)"
+          PY="$(command -v python3 || true)"
+          test -n "$UV" && test -x "$UV" || { echo PYRUNWAY_ENVIRONMENT_UNAVAILABLE; exit 69; }
+          test -n "$PY" && test -x "$PY" || { echo PYRUNWAY_ENVIRONMENT_UNAVAILABLE; exit 69; }
+          chmod 755 .ci/pyrunway/installers/install.sh .ci/pyrunway/launcher/pyrunway
+          .ci/pyrunway/installers/install.sh --prefix "$RUNNER_TEMP/pyrunway" --uv "$UV" --python "$PY"
+          "$RUNNER_TEMP/pyrunway/bin/pyrunway" --contract | grep -F '"release_version": "1.3.1"'
+      - name: Full DGER suite through governed PyRunway
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/pyrunway/bin/pyrunway" --standalone tests/run_all.py

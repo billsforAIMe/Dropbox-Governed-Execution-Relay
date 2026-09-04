@@ -1,0 +1,93 @@
+{
+  "schema": "pyrunway-contract/v1",
+  "name": "pyrunway",
+  "protocol": "PyRunway Protocol V1",
+  "version": "1.2",
+  "contract_version": "1.0",
+  "release_version": "1.3.1",
+  "capabilities": [
+    "project-canonical-venv",
+    "standalone-isolated"
+  ],
+  "runtime_features": [
+    "governed-contract-query",
+    "platform-local-uv-binding",
+    "standalone-python-binding",
+    "source-independent-install",
+    "fixed-bash-bootstrap",
+    "controlled-utility-path",
+    "explicit-dependency-install"
+  ],
+  "runtime_classes": [
+    "macos",
+    "linux-cloud"
+  ],
+  "modes": {
+    "describe": {
+      "argv": [
+        "--describe"
+      ],
+      "behavior": "Emit the exact backwards-compatible PyRunway Protocol V1 version 1.2 discovery projection after verifying installed contract, discovery projection, and runtime binding identities."
+    },
+    "contract": {
+      "argv": [
+        "--contract"
+      ],
+      "behavior": "Emit this complete governed semantic contract after verifying installed contract, discovery projection, and runtime binding identities."
+    },
+    "standalone": {
+      "argv_prefix": [
+        "--standalone",
+        "SCRIPT.py"
+      ],
+      "behavior": "Run an existing non-symlink Python script outside project semantics through installation-bound physical uv and standalone Python executables, with isolated/no-project/no-config/offline/no-download execution and scrubbed inherited Python/uv/shell environment authority."
+    },
+    "project": {
+      "argv_suffix": [
+        "PYTHON_ARGS..."
+      ],
+      "behavior": "Discover the nearest ancestor pyproject.toml from cwd, require its existing canonical non-symlink .venv environment, bind uv to that project and environment, scrub inherited Python/uv environment authority, and execute Python through bound uv. Normal mode may synchronize the existing canonical project environment; it does not create a missing canonical environment. Strict mode requires the same existing canonical environment without synchronization.",
+      "strict_environment_variable": "PYRUNWAY_STRICT=1",
+      "strict_behavior": "Require an existing non-symlink canonical .venv, use no-sync/offline/no-python-downloads, and verify sys.executable is lexically inside that canonical environment before target execution."
+    }
+  },
+  "failure_contract": {
+    "environment_unavailable": {
+      "exit_status": 69,
+      "stderr_token": "PYRUNWAY_ENVIRONMENT_UNAVAILABLE"
+    },
+    "standalone_usage": {
+      "exit_status": 64,
+      "stderr_token": "PYRUNWAY_STANDALONE_USAGE"
+    }
+  },
+  "python_authority": {
+    "ambient_python_fallback": false,
+    "children_must_use": "sys.executable",
+    "standalone_interpreter_must_be_installation_bound": true,
+    "standalone_python_downloads": false,
+    "standalone_package_provisioning": false,
+    "project_interpreter_authority": "canonical-project-environment"
+  },
+  "identity": {
+    "source_checkout_path_is_semantic": false,
+    "install_prefix_is_semantic": false,
+    "uv_physical_path_is_tool_identity": false,
+    "standalone_python_physical_path_is_tool_identity": false,
+    "runtime_binding_required": true
+  },
+  "trust_bootstrap": {
+    "shell_path": "/bin/bash",
+    "shell_mode": "privileged (-p) to suppress BASH_ENV and imported shell-function authority before script code",
+    "controlled_path": "/usr/bin:/bin",
+    "ambient_path_selects_dependencies": false,
+    "installer_requires_explicit_uv": true,
+    "installer_requires_explicit_standalone_python": true,
+    "bound_executables": [
+      "/bin/bash",
+      "uv",
+      "standalone_python"
+    ],
+    "runtime_hash_verification": true
+  }
+}

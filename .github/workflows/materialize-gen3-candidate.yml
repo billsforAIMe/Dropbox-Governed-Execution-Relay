@@ -1,0 +1,44 @@
+name: Materialize Gen3 Candidate
+
+on:
+  push:
+    branches:
+      - builder/dger-gen3-moh-chm
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Bind materializer to exact pushed head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+      - name: Reconstruct exact candidate bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .ci/dger-gen3-materialize/chunk-* > "$RUNNER_TEMP/dger-gen3.b64"
+          base64 --decode "$RUNNER_TEMP/dger-gen3.b64" > "$RUNNER_TEMP/dger-gen3.tar.gz"
+          test "$(sha256sum "$RUNNER_TEMP/dger-gen3.tar.gz" | awk '{print $1}')" = "940be1436db68489bf5f548169cc0d16093d2488e51e4baeb89a164fed71c756"
+          tar -xzf "$RUNNER_TEMP/dger-gen3.tar.gz" -C .
+          rm -rf .ci/dger-gen3-materialize
+          rm -f .github/workflows/materialize-gen3-candidate.yml
+          git diff --check
+          git status --short
+      - name: Publish materialized Builder candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'DGER Builder Materializer'
+          git config user.email 'dger-builder@local.invalid'
+          git add -A
+          git commit -m 'Implement DGER Generation 3 MOH CHM relay'
+          git push origin HEAD:builder/dger-gen3-moh-chm
