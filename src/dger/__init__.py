@@ -1,2 +1,3 @@
-"""Dropbox Governed Execution Relay Prototype R0."""
-__version__ = "0.1.0"
+"""Dropbox Governed Execution Relay."""
+
+__version__ = "1.0.0"
