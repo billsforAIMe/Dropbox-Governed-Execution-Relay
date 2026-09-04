@@ -48,6 +48,8 @@ An already accepted execution never re-resolves to a newer provider. A replay wi
 
 Because current GTG `invoke_tool` has no expected-release CAS argument, DGER conservatively Doctor-checks the frozen provider immediately before each semantic invocation. If that route advanced, DGER records/preserves recovery state and invokes nothing until the exact frozen route is callable again.
 
+After acceptance, recovery is driven by DGER State rather than continued presence of the external Dropbox package. The accepted request/envelope/payload are already frozen in private State, so later MOH reconciliation and CHM-only publication continue even if `Ingress/<execution_id>` is removed. If an ingress package remains or reappears, DGER still validates it against the frozen intent before treating it as an idempotent replay.
+
 ## 3. MOH stage and execution
 
 DGER first copies the immutable package to private DGER State, verifies read-back, then materializes only:

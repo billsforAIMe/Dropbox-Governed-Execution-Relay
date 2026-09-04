@@ -27,6 +27,22 @@ from .relay_moh import RelayMohMixin
 from .relay_chm import RelayChmMixin
 
 class Relay(RelayRuntimeMixin, RelayAcceptMixin, RelayMohMixin, RelayChmMixin):
+    def _advance_locked(self, execution_id: str, current: dict[str, Any]) -> bool:
+        if current["phase"] in {"DONE", "CHM_RESULT_CONFLICT"}:
+            return True
+        if current["phase"] in {"ACCEPTED", "MOH_STAGE_COMPLETE", "MOH_RECONCILE", "MOH_IN_DOUBT"}:
+            try:
+                self._reconcile_moh(current)
+            except DgerError as exc:
+                current["last_reconcile_error"] = {"code": exc.code, "detail": exc.detail[:512]}
+                save_state(self.state, execution_id, current)
+                self._status(execution_id, "MOH_RECONCILIATION_BLOCKED", code=exc.code, detail=exc.detail[:512])
+                return True
+            current = load_state(self.state, execution_id) or current
+        if current["phase"] in {"CHM_PENDING", "CHM_ATTACHED"}:
+            self._publish_chm(current)
+        return True
+
     def process_one(self, package: Path) -> bool:
         execution_id = package.name
         if EXECUTION_ID_RE.fullmatch(execution_id) is None or package.is_symlink() or not package.is_dir():
@@ -51,21 +67,17 @@ class Relay(RelayRuntimeMixin, RelayAcceptMixin, RelayMohMixin, RelayChmMixin):
                         return True
                     self._status(execution_id, "REJECTED_REPLAY", code=exc.code, detail=exc.detail)
                     return True
+            return self._advance_locked(execution_id, current)
 
-            if current["phase"] in {"DONE", "CHM_RESULT_CONFLICT"}:
-                return True
-            if current["phase"] in {"ACCEPTED", "MOH_STAGE_COMPLETE", "MOH_RECONCILE", "MOH_IN_DOUBT"}:
-                try:
-                    self._reconcile_moh(current)
-                except DgerError as exc:
-                    current["last_reconcile_error"] = {"code": exc.code, "detail": exc.detail[:512]}
-                    save_state(self.state, execution_id, current)
-                    self._status(execution_id, "MOH_RECONCILIATION_BLOCKED", code=exc.code, detail=exc.detail[:512])
-                    return True
-                current = load_state(self.state, execution_id) or current
-            if current["phase"] in {"CHM_PENDING", "CHM_ATTACHED"}:
-                self._publish_chm(current)
-            return True
+    def resume_one(self, execution_id: str) -> bool:
+        """Resume an accepted execution from durable State without requiring Dropbox ingress."""
+        if EXECUTION_ID_RE.fullmatch(execution_id) is None:
+            return False
+        with self.execution_lock(execution_id):
+            current = load_state(self.state, execution_id)
+            if current is None:
+                return False
+            return self._advance_locked(execution_id, current)
 
     def scan_once(self) -> None:
         packages: list[Path] = []
@@ -81,11 +93,36 @@ class Relay(RelayRuntimeMixin, RelayAcceptMixin, RelayMohMixin, RelayChmMixin):
                 self.process_one(path)
             except Exception:
                 degraded = True
+
+        # Acceptance copies all execution material and exact provider identities into
+        # Tool State. Recovery is therefore State-driven and must not depend on a
+        # sender retaining the external Dropbox package after READY was accepted.
+        executions = self.state / "executions"
+        durable_ids: list[str] = []
+        if executions.exists():
+            if executions.is_symlink() or not executions.is_dir():
+                degraded = True
+            else:
+                for path in executions.iterdir():
+                    try:
+                        if path.is_symlink() or not path.is_file() or path.suffix != ".json":
+                            continue
+                        execution_id = path.stem
+                        if EXECUTION_ID_RE.fullmatch(execution_id) is not None:
+                            durable_ids.append(execution_id)
+                    except OSError:
+                        degraded = True
+        for execution_id in sorted(set(durable_ids)):
+            try:
+                self.resume_one(execution_id)
+            except Exception:
+                degraded = True
+
         atomic_json(self.control / "health.json", {
             "schema": PROTOCOL,
             "updated_at_utc": utc(),
             "relay_state": "DEGRADED" if degraded else "IDLE",
-            "accepted_execution_count": len(list((self.state / "executions").glob("*.json"))) if (self.state / "executions").exists() else 0,
+            "accepted_execution_count": len(set(durable_ids)),
         }, 0o644)
 
     def run(self) -> None:

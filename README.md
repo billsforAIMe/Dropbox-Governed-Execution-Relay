@@ -25,7 +25,9 @@ New executions are accepted for host work only when GTG Doctor reports the requi
 
 Before any MOH-visible stage exists, DGER also requires `handoff_get` to return the supplied logical handoff in `STARTED` state with no prior result. CHM derives project authority from DGER's authenticated GTG transport binding; ingress cannot select a project or credential. Those exact identities are then frozen in DGER State at acceptance. Before each later effect call, DGER rechecks that the same frozen provider identity is still the current callable route. Provider advancement therefore pauses recovery rather than silently switching an accepted execution to a newer release. Once MOH has reported `IN_DOUBT`, DGER also permanently bars any later `execute` for that execution ID, including if a subsequent status lookup returns `NOT_FOUND`.
 
-Authoritative CHM Generation 8 does not yet expose the required durable logical-result operations. Until CHM publishes them on authoritative `main` and GTG/Registry activation reflects that release, Generation-3 DGER correctly fails closed before Mac execution. No unpublished CHM candidate is treated as authority.
+Once accepted, reconciliation is State-driven: removal of the external Dropbox ingress package cannot strand a running/ambiguous MOH execution or CHM-only publication. A retained/replayed ingress package is still checked against the frozen intent.
+
+Authoritative CHM Generation 9 (`d3d491acb9cf09ff12a594613da56ecb3f4606d7`) adds a governed cloud-assurance lane but does not change production lifecycle semantics or expose the required durable logical-result operations. Until CHM publishes those operations on authoritative `main` and GTG/Registry activation reflects that release, Generation-3 DGER correctly fails closed before Mac execution. No unpublished CHM candidate is treated as authority.
 
 ## Protocol
 
