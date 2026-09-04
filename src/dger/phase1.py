@@ -216,6 +216,28 @@ class Phase1Relay:
             raise RelayPhase1Error("OUTBOX_CONFLICT")
         return existing
 
+    def _resume_terminal_delivery(self, handoff: Mapping[str, Any]) -> dict[str, Any]:
+        execution_id = handoff["execution_id"]
+        terminal = handoff.get("terminal_result")
+        if not isinstance(terminal, Mapping) or handoff.get("status") not in TERMINAL:
+            raise RelayPhase1Error("CHM_TERMINAL_READBACK_INVALID")
+        outbox = load_json(self._outbox_path(execution_id))
+        if outbox is None:
+            # The protocol requires OUTBOX_PENDING before CHM terminal publication.
+            # A CHM terminal result without that write-ahead evidence is therefore
+            # inconsistent and must not be repaired by re-execution.
+            raise RelayPhase1Error("CHM_TERMINAL_WITHOUT_OUTBOX")
+        if (
+            outbox.get("handoff_id") != handoff.get("handoff_id")
+            or outbox.get("v1_action_id") != handoff.get("v1_action_id")
+            or outbox.get("terminal_proof", {}).get("status") != handoff.get("status")
+            or outbox.get("terminal_proof", {}).get("result_manifest_reference") != terminal.get("result_manifest_reference")
+            or outbox.get("terminal_proof", {}).get("result_manifest_digest") != terminal.get("result_manifest_digest")
+            or outbox.get("terminal_proof", {}).get("descriptor_digest") != terminal.get("descriptor_digest")
+        ):
+            raise RelayPhase1Error("CHM_TERMINAL_OUTBOX_CONFLICT")
+        return self.deliver(execution_id)
+
     def process(self, handoff_id: str) -> dict[str, Any]:
         if not HANDOFF_RE.fullmatch(handoff_id):
             raise RelayPhase1Error("INVALID_HANDOFF_ID")
@@ -224,6 +246,8 @@ class Phase1Relay:
         descriptor = handoff["execution_descriptor"]
         if descriptor.get("execution_id") != execution_id or descriptor.get("chm_handoff_id") != handoff_id:
             raise RelayPhase1Error("HANDOFF_DESCRIPTOR_CONFLICT")
+        if handoff.get("status") in TERMINAL:
+            return self._resume_terminal_delivery(handoff)
         self._save_execution(execution_id, {"handoff_id": handoff_id, "execution_id": execution_id, "descriptor_digest": handoff["execution_descriptor_digest"], "phase": "RECEIVED"})
         self._crash("after_request_receipt")
 
