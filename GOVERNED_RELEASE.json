@@ -30,7 +30,7 @@
   "rolls_back_to_generation": null,
   "runtime_compatibility": {
     "compatible_runtime_commits": [],
-    "note": "Generation 3 adds the Phase-1 CHM-to-GEP reconcile-first relay, write-ahead durable completion outbox, advisory wake, and exact installed GEP Phase-1 launcher binding while retaining R0 compatibility.",
+    "note": "Generation 3 adds the Phase-1 reconcile-first relay with CHM atomic capacity recovery, RUNNING-to-BLOCKED uncertainty, GEP-anchored uncertainty publication, write-ahead durable completion outbox, terminal-delivery-only recovery, advisory wake, and exact installed GEP Phase-1 launcher binding while retaining R0 compatibility.",
     "policy": "exact_or_explicit_immutable_tool_release_declaration"
   },
   "supersedes_generation": 2,
