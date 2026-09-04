@@ -37,6 +37,7 @@ HANDOFF_ID_RE = re.compile(r"^hnd_[0-9a-f]{64}$")
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
 HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+INVOCATION_ID_RE = re.compile(r"^inv_[0-9a-f]{32}$")
 
 MOH_TERMINAL_PUBLISHABLE = {"SUCCEEDED", "FAILED", "REJECTED_PRECONDITION", "REJECTED_DUPLICATE_MISMATCH"}
 MOH_UNRESOLVED = {"IN_DOUBT"}
@@ -53,13 +54,6 @@ class DgerError(RuntimeError):
 class SemanticGateway(Protocol):
     def doctor(self, tool_id: str, operation: str) -> dict[str, Any]: ...
     def invoke(self, tool_id: str, operation: str, arguments: dict[str, Any]) -> dict[str, Any]: ...
-    def invoke_frozen(
-        self,
-        tool_id: str,
-        operation: str,
-        arguments: dict[str, Any],
-        frozen_binding: dict[str, Any],
-    ) -> dict[str, Any]: ...
     def get_invocation(self, invocation_id: str) -> dict[str, Any]: ...
 
 

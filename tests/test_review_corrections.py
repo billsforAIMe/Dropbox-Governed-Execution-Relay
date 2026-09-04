@@ -11,20 +11,25 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "dger"
 
+
 class DgerError(RuntimeError):
     def __init__(self, code: str, detail: str = ""):
         super().__init__(code)
         self.code = code
         self.detail = detail
 
+
 STORE: dict[str, dict] = {}
+
 
 def save_state(_root, execution_id, state):
     STORE[execution_id] = copy.deepcopy(state)
 
+
 def load_state(_root, execution_id):
     value = STORE.get(execution_id)
     return copy.deepcopy(value) if value is not None else None
+
 
 def unwrap(value, _tool, _operation):
     inv = value.get("invocation_id") if isinstance(value.get("invocation_id"), str) else None
@@ -32,10 +37,30 @@ def unwrap(value, _tool, _operation):
         return value["result"], inv
     return None, inv
 
+
+def attestation(value, tool, operation):
+    att = value.get("identity_attestation")
+    evidence = value.get("evidence")
+    if not isinstance(att, dict) or not isinstance(evidence, dict):
+        raise DgerError("GTG_IDENTITY_ATTESTATION_REQUIRED")
+    if evidence.get("tool_id") != tool or evidence.get("tool_identity") != att.get("tool_identity"):
+        raise DgerError("GTG_INVOCATION_IDENTITY_MISMATCH")
+    return {
+        "tool_id": tool,
+        "operation": operation,
+        "invocation_id": value["invocation_id"],
+        "tool_identity": att["tool_identity"],
+        "tool_tree": att["tool_tree"],
+        "gtg_identity": att["gtg_identity"],
+        "registry_identity": evidence["registry_identity"],
+    }
+
+
 def response(eid: str, state: str) -> dict:
     return {"schema": "moh-status/v1", "execution_id": eid, "state": state}
 
-def wrapped(eid: str, state: str) -> dict:
+
+def wrapped(eid: str, state: str, *, tool_identity: str = "1" * 40, tool_tree: str = "2" * 40) -> dict:
     return {
         "ok": True,
         "invocation_id": "inv_" + "1" * 32,
@@ -44,11 +69,22 @@ def wrapped(eid: str, state: str) -> dict:
             "state": state,
             "response_json": json.dumps(response(eid, state), sort_keys=True, separators=(",", ":")),
         },
+        "identity_attestation": {
+            "tool_identity": tool_identity,
+            "tool_tree": tool_tree,
+            "gtg_identity": "9" * 40,
+        },
+        "evidence": {
+            "tool_id": "mac-operation-host",
+            "tool_identity": tool_identity,
+            "registry_identity": "3" * 40,
+        },
     }
 
-# Synthetic package shell so the exact changed source files can be imported without
-# reconstructing unchanged modules. Every behavior exercised below comes from the
-# changed source files themselves; only unrelated dependencies are stubbed.
+
+# Synthetic package shell so exact changed source files can be imported without
+# reconstructing unchanged modules. Behaviors below come from changed source files;
+# only unrelated dependencies are stubbed.
 pkg = types.ModuleType("dger")
 pkg.__path__ = [str(SRC)]
 sys.modules["dger"] = pkg
@@ -68,10 +104,10 @@ protocol.MOH_UNRESOLVED = {"IN_DOUBT"}
 protocol.DgerError = DgerError
 protocol.SemanticGateway = object
 protocol._json_object_no_duplicates = lambda raw: json.loads(raw.decode("utf-8"))
+protocol._invocation_attestation = attestation
 protocol.utc = lambda: "2026-09-04T00:00:00Z"
 protocol.EXECUTION_ID_RE = __import__("re").compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 protocol.PROTOCOL = "DGER_EXECUTION_V1"
-# Unused imported names for these focused paths.
 for name in (
     "_intent_digest", "_safe_rel", "_validate_consumer_binding", "_validate_ready", "_validate_request",
     "atomic_bytes", "atomic_json", "canonical_bytes", "canonical_digest", "canonical_file_bytes",
@@ -92,8 +128,6 @@ state_mod._safe_execution_dir = lambda *a, **k: Path("/tmp")
 state_mod._stage_digest = lambda *a, **k: "stage"
 state_mod.freeze_ingress = lambda *a, **k: None
 state_mod.materialize_moh_stage = lambda *a, **k: None
-for n in ("_chm_result", "_safe_execution_dir", "freeze_ingress"):
-    pass
 sys.modules["dger.relay_state"] = state_mod
 
 runtime_mod = types.ModuleType("dger.relay_runtime")
@@ -103,13 +137,18 @@ accept_mod = types.ModuleType("dger.relay_accept")
 accept_mod.RelayAcceptMixin = type("RelayAcceptMixin", (), {})
 sys.modules["dger.relay_accept"] = accept_mod
 chm_mod = types.ModuleType("dger.relay_chm")
+
+
 class StubChmMixin:
     def _publish_chm(self, state):
         self.chm_publications = getattr(self, "chm_publications", 0) + 1
         state["phase"] = "DONE"
         save_state(self.state, state["execution_id"], state)
+
+
 chm_mod.RelayChmMixin = StubChmMixin
 sys.modules["dger.relay_chm"] = chm_mod
+
 
 def load(name: str, file: str):
     spec = importlib.util.spec_from_file_location(name, SRC / file)
@@ -119,9 +158,11 @@ def load(name: str, file: str):
     spec.loader.exec_module(module)
     return module
 
+
 invoke_mod = load("dger.relay_moh_invoke", "relay_moh_invoke.py")
 moh_mod = load("dger.relay_moh", "relay_moh.py")
 v1_mod = load("dger.relay_v1", "relay_v1.py")
+
 
 class Harness(moh_mod.RelayMohMixin):
     def __init__(self, gateway):
@@ -131,9 +172,6 @@ class Harness(moh_mod.RelayMohMixin):
         self.statuses = []
         self.published = []
 
-    def _verify_frozen_binding(self, state, key, tool_id, operation):
-        return None
-
     def _status(self, execution_id, status, **extra):
         self.statuses.append((execution_id, status, extra))
 
@@ -141,27 +179,26 @@ class Harness(moh_mod.RelayMohMixin):
         self.published.append((execution_id, copy.deepcopy(record)))
         return "a" * 64, f"Runs/{execution_id}/result.json"
 
+
 class KillAfterEffectGateway:
     def __init__(self):
         self.calls = []
         self.kill_execute_once = True
 
-    def invoke_frozen(self, tool_id, operation, arguments, expected_binding):
+    def invoke(self, tool_id, operation, arguments):
         self.calls.append(operation)
         if operation == "execute" and self.kill_execute_once:
             self.kill_execute_once = False
-            # Simulate process termination after the external effect reached its owner.
             raise SystemExit("power loss after MOH accepted execute")
-        if operation == "status":
-            return wrapped(arguments["execution_id"], "SUCCEEDED")
         return wrapped(arguments["execution_id"], "SUCCEEDED")
+
 
 class SequenceGateway:
     def __init__(self):
         self.status_events = ["IN_DOUBT", RuntimeError("status transport lost"), "NOT_FOUND"]
         self.calls = []
 
-    def invoke_frozen(self, tool_id, operation, arguments, expected_binding):
+    def invoke(self, tool_id, operation, arguments):
         self.calls.append(operation)
         if operation == "execute":
             raise AssertionError("execute must never be called after IN_DOUBT latch")
@@ -170,15 +207,25 @@ class SequenceGateway:
             raise event
         return wrapped(arguments["execution_id"], event)
 
-class FrozenRaceGateway:
+
+class InvocationAdvanceGateway:
     def __init__(self):
         self.effect_count = 0
         self.calls = []
 
-    def invoke_frozen(self, tool_id, operation, arguments, expected_binding):
-        self.calls.append((operation, copy.deepcopy(expected_binding)))
-        # Represents an atomic GTG CAS mismatch after Doctor preflight but before effect.
-        return {"ok": False, "code": "EXPECTED_BINDING_MISMATCH", "status": "rejected"}
+    def invoke(self, tool_id, operation, arguments):
+        self.calls.append(operation)
+        if operation == "execute":
+            self.effect_count += 1
+        return wrapped(arguments["execution_id"], "SUCCEEDED", tool_identity="6" * 40, tool_tree="7" * 40)
+
+
+class MissingAttestationGateway:
+    def invoke(self, tool_id, operation, arguments):
+        value = wrapped(arguments["execution_id"], "SUCCEEDED")
+        value.pop("identity_attestation")
+        return value
+
 
 class ReviewCorrectionTests(unittest.TestCase):
     def setUp(self):
@@ -188,7 +235,7 @@ class ReviewCorrectionTests(unittest.TestCase):
         return {
             "execution_id": eid,
             "phase": "MOH_STAGE_COMPLETE",
-            "moh_binding": {"tool_identity": "1" * 40},
+            "moh_binding": {"tool_identity": "1" * 40, "tool_tree": "2" * 40},
             "moh_execute_calls": 0,
             "moh_status_calls": 0,
             "envelope": {},
@@ -207,7 +254,6 @@ class ReviewCorrectionTests(unittest.TestCase):
         self.assertTrue(durable["moh_execute_may_have_happened"])
         self.assertEqual(durable["moh_execute_calls"], 1)
 
-        # Restart from durable State: reconciliation asks status first; it does not execute again.
         relay2 = Harness(gateway)
         relay2._reconcile_moh(durable)
         self.assertEqual(gateway.calls, ["execute", "status"])
@@ -224,12 +270,12 @@ class ReviewCorrectionTests(unittest.TestCase):
         self.assertTrue(durable["moh_in_doubt_ever"])
         self.assertEqual(durable["phase"], "MOH_IN_DOUBT")
 
-        relay._reconcile_moh(durable)  # transport ambiguity
+        relay._reconcile_moh(durable)
         durable = load_state(relay.state, "exec-2")
         self.assertTrue(durable["moh_in_doubt_ever"])
         self.assertEqual(durable["phase"], "MOH_IN_DOUBT")
 
-        relay._reconcile_moh(durable)  # later NOT_FOUND
+        relay._reconcile_moh(durable)
         durable = load_state(relay.state, "exec-2")
         self.assertEqual(durable["phase"], "MOH_IN_DOUBT")
         self.assertEqual(gateway.calls, ["status", "status", "status"])
@@ -257,32 +303,44 @@ class ReviewCorrectionTests(unittest.TestCase):
         self.assertEqual(relay.chm_publications, 1)
         self.assertEqual(load_state(relay.state, "exec-3")["phase"], "DONE")
 
-    def test_b04_exact_binding_rejection_prevents_effect_after_preflight_race(self):
-        gateway = FrozenRaceGateway()
+    def test_b04_invocation_time_provider_advance_is_attested_not_preblocked(self):
+        gateway = InvocationAdvanceGateway()
         relay = Harness(gateway)
         state = self.base_state("exec-4")
         result = relay._invoke_moh(state, "execute")
-        self.assertIsNone(result)
-        self.assertEqual(gateway.effect_count, 0)
-        self.assertEqual(load_state(relay.state, "exec-4")["phase"], "MOH_RECONCILE")
-        self.assertEqual(gateway.calls[0][0], "execute")
-        self.assertEqual(gateway.calls[0][1], state["moh_binding"])
+        self.assertIsNotNone(result)
+        self.assertEqual(gateway.effect_count, 1)
+        durable = load_state(relay.state, "exec-4")
+        self.assertEqual(durable["moh_binding"]["tool_identity"], "1" * 40)
+        self.assertEqual(durable["moh_execute_attestation"]["tool_identity"], "6" * 40)
+        self.assertEqual(durable["moh_execute_attestation"]["tool_tree"], "7" * 40)
 
-    def test_http_adapter_blocks_until_authoritative_gtg_cas_exists(self):
+    def test_success_without_attestation_is_reconcile_only(self):
+        relay = Harness(MissingAttestationGateway())
+        state = self.base_state("exec-5")
+        result = relay._invoke_moh(state, "execute")
+        self.assertIsNone(result)
+        durable = load_state(relay.state, "exec-5")
+        self.assertEqual(durable["phase"], "MOH_RECONCILE")
+        self.assertTrue(durable["moh_execute_may_have_happened"])
+        self.assertEqual(durable["last_moh_attestation_error"]["code"], "GTG_IDENTITY_ATTESTATION_REQUIRED")
+
+    def test_http_adapter_requires_attestation_on_success(self):
         spec = importlib.util.spec_from_file_location("dger.gtg_http", SRC / "gtg_http.py")
         mod = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
         spec.loader.exec_module(mod)
         gateway = object.__new__(mod.GTGHttpGateway)
-        gateway._call = lambda *a, **k: (_ for _ in ()).throw(AssertionError("network call must not occur"))
-        binding = {
-            "authoritative_binding": {"repository_id": "123", "selector": "refs/heads/main"},
-            "tool_identity": "1" * 40,
-            "tool_tree": "2" * 40,
-            "registry_identity": "3" * 40,
-        }
-        with self.assertRaisesRegex(mod.GTGHttpError, "GTG_ATOMIC_BINDING_CAS_UNAVAILABLE"):
-            gateway.invoke_frozen("mac-operation-host", "execute", {"execution_id": "exec-4"}, binding)
+        valid = wrapped("exec-6", "SUCCEEDED")
+        gateway._call = lambda *a, **k: copy.deepcopy(valid)
+        returned = gateway.invoke("mac-operation-host", "execute", {"execution_id": "exec-6"})
+        self.assertEqual(returned["identity_attestation"]["tool_identity"], "1" * 40)
+
+        invalid = copy.deepcopy(valid)
+        invalid.pop("identity_attestation")
+        gateway._call = lambda *a, **k: copy.deepcopy(invalid)
+        with self.assertRaisesRegex(mod.GTGHttpError, "GTG_IDENTITY_ATTESTATION_REQUIRED"):
+            gateway.invoke("mac-operation-host", "execute", {"execution_id": "exec-6"})
 
 
 if __name__ == "__main__":
