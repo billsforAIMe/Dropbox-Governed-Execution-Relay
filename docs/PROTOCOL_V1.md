@@ -148,7 +148,7 @@ Production activation requires:
 - GTG successful Tool invocation responses to provide exact Tool/tree/GTG identity attestation and consistent invocation evidence; and
 - MOH `execute`/`status` to be authoritative and callable through GTG.
 
-At the time of Generation-3 delivery, authoritative CHM Generation 10 provides the logical lifecycle and authoritative GTG Generation 17 preserves the exact identity-attestation semantics introduced in Generation 16. These generation numbers are observations, not permanent hard-coded provider pins; act-time deployment verification must prove the required capabilities remain available.
+At the time of Generation-3 delivery, authoritative CHM Generation 10 provides the logical lifecycle and authoritative GTG Generation 18 preserves the exact identity-attestation semantics introduced in Generation 16. These generation numbers are observations, not permanent hard-coded provider pins; act-time deployment verification must prove the required capabilities remain available.
 
 ## 8. Failure ordering
 
