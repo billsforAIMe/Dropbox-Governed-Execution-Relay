@@ -45,23 +45,24 @@ class RelayMohMixin(RelayMohInvokeMixin):
                 self._handle_moh_response(state, response)
             return
         if state["phase"] in {"MOH_RECONCILE", "MOH_IN_DOUBT"}:
-            prior_phase = state["phase"]
             response = self._invoke_moh(state, "status")
             if response is None:
                 return
             if response["state"] == "NOT_FOUND":
-                if prior_phase == "MOH_IN_DOUBT":
-                    # Once any MOH truth has been IN_DOUBT, DGER permanently gives up first-start
-                    # authority for this execution_id. Even loss/corruption of later MOH lookup
-                    # state cannot turn uncertainty into permission to execute again.
+                if state.get("moh_in_doubt_ever") is True:
+                    # IN_DOUBT is an irreversible safety latch. Once observed, no later
+                    # transport ambiguity, phase transition, or NOT_FOUND can restore
+                    # permission for DGER to call execute for this execution_id.
                     state["phase"] = "MOH_IN_DOUBT"
                     state["last_moh_response"] = response
                     save_state(self.state, execution_id, state)
                     self._status(execution_id, "MOH_IN_DOUBT", failure_code="PRIOR_IN_DOUBT_NOT_FOUND")
                     return
                 # A prior execute response may have been lost before MOH admission. Only when
-                # DGER has never observed IN_DOUBT may NOT_FOUND permit the idempotent execute
-                # call that lets MOH take the one permitted first start.
+                # DGER has never observed IN_DOUBT may NOT_FOUND permit another same-ID execute.
+                # _invoke_moh durably records execute-may-have-happened / MOH_RECONCILE before
+                # it performs the external effect, so process death can never restart here as
+                # another blind execute.
                 response = self._invoke_moh(state, "execute")
                 if response is None:
                     return

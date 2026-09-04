@@ -39,7 +39,12 @@ class RelayChmMixin:
                 state["chm_publish_calls"] = int(state.get("chm_publish_calls", 0)) + 1
                 save_state(self.state, execution_id, state)
                 self._verify_frozen_binding(state, "chm_binding", CHM_TOOL_ID, "handoff_attach_result")
-                wrapped = self.gateway.invoke(CHM_TOOL_ID, "handoff_attach_result", {"handoff_id": handoff_id, "result": chm_result})
+                wrapped = self.gateway.invoke_frozen(
+                    CHM_TOOL_ID,
+                    "handoff_attach_result",
+                    {"handoff_id": handoff_id, "result": chm_result},
+                    state["chm_binding"],
+                )
                 result, invocation_id = _unwrap_gtg_result(wrapped, CHM_TOOL_ID, "handoff_attach_result")
                 if invocation_id:
                     state["last_chm_invocation_id"] = invocation_id
@@ -59,7 +64,12 @@ class RelayChmMixin:
                 self._status(execution_id, "CHM_RESULT_ATTACHED")
 
             self._verify_frozen_binding(state, "chm_binding", CHM_TOOL_ID, "handoff_resolve")
-            wrapped = self.gateway.invoke(CHM_TOOL_ID, "handoff_resolve", {"handoff_id": handoff_id})
+            wrapped = self.gateway.invoke_frozen(
+                CHM_TOOL_ID,
+                "handoff_resolve",
+                {"handoff_id": handoff_id},
+                state["chm_binding"],
+            )
             result, invocation_id = _unwrap_gtg_result(wrapped, CHM_TOOL_ID, "handoff_resolve")
             if invocation_id:
                 state["last_chm_invocation_id"] = invocation_id

@@ -117,5 +117,19 @@ class GTGHttpGateway:
     def invoke(self, tool_id: str, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return self._call("invoke_tool", {"tool_id": tool_id, "operation": operation, "arguments": arguments})
 
+    def invoke_frozen(
+        self,
+        tool_id: str,
+        operation: str,
+        arguments: dict[str, Any],
+        frozen_binding: dict[str, Any],
+    ) -> dict[str, Any]:
+        # Current authoritative GTG has no atomic expected-provider identity/CAS
+        # argument on invoke_tool. Do not emulate that with Doctor -> invoke; the
+        # gap is a real activation dependency. A future adapter may implement this
+        # method only against an authoritative GTG contract that performs the
+        # binding comparison atomically with route selection and dispatch.
+        raise GTGHttpError("GTG_ATOMIC_BINDING_CAS_UNAVAILABLE")
+
     def get_invocation(self, invocation_id: str) -> dict[str, Any]:
         return self._call("get_invocation", {"invocation_id": invocation_id})

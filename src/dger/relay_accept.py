@@ -33,12 +33,17 @@ class RelayAcceptMixin:
         _validate_consumer_binding(envelope, consumer_binding)
 
         # Validate the actual logical handoff before any MOH-visible stage exists.
-        # CHM derives project authority from the authenticated GTG transport binding;
-        # ingress never selects or supplies a project/credential. A new execution may
-        # attach a result only to an existing STARTED handoff with no prior result.
-        wrapped = self.gateway.invoke(
-            CHM_TOOL_ID, "handoff_get", {"handoff_id": request["logical_handoff_id"]}
-        )
+        # The invoke itself is bound atomically to the exact Doctor projection; a
+        # gateway that cannot provide frozen-binding CAS must fail before dispatch.
+        try:
+            wrapped = self.gateway.invoke_frozen(
+                CHM_TOOL_ID,
+                "handoff_get",
+                {"handoff_id": request["logical_handoff_id"]},
+                chm_binding,
+            )
+        except Exception as exc:
+            raise DgerError("GTG_ATOMIC_BINDING_CAS_UNAVAILABLE", str(exc)[:512]) from exc
         handoff, _ = _unwrap_gtg_result(wrapped, CHM_TOOL_ID, "handoff_get")
         if handoff is None or handoff.get("ok") is not True:
             raise DgerError("CHM_HANDOFF_PREFLIGHT_FAILED", str(wrapped.get("code", "")))
@@ -46,8 +51,10 @@ class RelayAcceptMixin:
             raise DgerError("CHM_HANDOFF_ID_MISMATCH")
         if handoff.get("state") != "STARTED" or handoff.get("result") is not None:
             raise DgerError("CHM_HANDOFF_NOT_EXECUTION_READY", str(handoff.get("state", "")))
-        # Current GTG invoke_tool cannot carry an expected Tool identity CAS. Re-read
-        # Doctor after the preflight and require the exact CHM binding to be unchanged.
+
+        # Keep the post-read currentness check as a conservative acceptance fence.
+        # The atomic invoke protects the read itself; this check prevents accepting
+        # a now-stale binding immediately after the read.
         chm_after_get = resolve_tool_binding(self.gateway, CHM_TOOL_ID, REQUIRED_CHM_OPERATIONS)
         if chm_after_get != chm_binding:
             raise DgerError("GTG_BINDING_CHANGED_DURING_ACCEPTANCE", CHM_TOOL_ID)
@@ -74,6 +81,7 @@ class RelayAcceptMixin:
             "moh_execute_calls": 0,
             "moh_status_calls": 0,
             "chm_publish_calls": 0,
+            "moh_in_doubt_ever": False,
         }
         save_state(self.state, execution_id, state)
         self._status(execution_id, "ACCEPTED")

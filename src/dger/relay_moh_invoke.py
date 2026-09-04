@@ -27,13 +27,27 @@ class RelayMohInvokeMixin:
         execution_id = state["execution_id"]
         key = "moh_execute_calls" if operation == "execute" else "moh_status_calls"
         state[key] = int(state.get(key, 0)) + 1
+
+        # Write-ahead safety boundary: before any effectful execute can leave DGER,
+        # durable State says that execute may already have happened. A process/power
+        # loss after MOH receives the call therefore restarts in status reconciliation,
+        # never directly in another execute path.
+        if operation == "execute":
+            state["moh_execute_may_have_happened"] = True
+            state["phase"] = "MOH_RECONCILE"
+            state["moh_execute_intent_at_utc"] = utc()
         save_state(self.state, execution_id, state)
         try:
             self._verify_frozen_binding(state, "moh_binding", MOH_TOOL_ID, operation)
-            wrapped = self.gateway.invoke(MOH_TOOL_ID, operation, {"execution_id": execution_id})
+            wrapped = self.gateway.invoke_frozen(
+                MOH_TOOL_ID,
+                operation,
+                {"execution_id": execution_id},
+                state["moh_binding"],
+            )
         except Exception as exc:
             state["last_moh_transport_error"] = str(exc)[:512]
-            state["phase"] = "MOH_RECONCILE"
+            state["phase"] = "MOH_IN_DOUBT" if state.get("moh_in_doubt_ever") is True else "MOH_RECONCILE"
             save_state(self.state, execution_id, state)
             self._status(execution_id, "MOH_RESPONSE_AMBIGUOUS", operation=operation)
             return None
@@ -44,7 +58,7 @@ class RelayMohInvokeMixin:
             state["last_moh_gateway_response"] = {
                 key: wrapped.get(key) for key in ("code", "status", "execution_may_have_completed", "message") if key in wrapped
             }
-            state["phase"] = "MOH_RECONCILE"
+            state["phase"] = "MOH_IN_DOUBT" if state.get("moh_in_doubt_ever") is True else "MOH_RECONCILE"
             save_state(self.state, execution_id, state)
             self._status(execution_id, "MOH_RESPONSE_AMBIGUOUS", operation=operation, invocation_id=invocation_id)
             return None
@@ -54,6 +68,25 @@ class RelayMohInvokeMixin:
         response = _json_object_no_duplicates(response_json.encode("utf-8"))
         _validate_moh_response(response, execution_id)
         return response
+
+    def _resume_terminal_publication(self, state: dict[str, Any]) -> None:
+        """Finish durable result publication from an already-saved MOH terminal truth."""
+        execution_id = state["execution_id"]
+        response = state.get("moh_terminal_response")
+        if not isinstance(response, dict) or response.get("state") not in MOH_TERMINAL_PUBLISHABLE:
+            raise DgerError("MOH_TERMINAL_STATE_INVALID")
+        record = _result_record(state, response, f"Runs/{execution_id}/result.json")
+        result_sha, ref = self._publish_result(execution_id, record)
+        state["result_sha256"] = result_sha
+        state["result_ref"] = ref
+        state["phase"] = "CHM_PENDING"
+        save_state(self.state, execution_id, state)
+        self._status(
+            execution_id,
+            "CHM_PENDING",
+            terminal_disposition=state["moh_terminal_state"],
+            result_sha256=result_sha,
+        )
 
     def _handle_moh_response(self, state: dict[str, Any], response: dict[str, Any]) -> None:
         execution_id = state["execution_id"]
@@ -65,16 +98,11 @@ class RelayMohInvokeMixin:
             state["moh_terminal_response"] = response
             state["moh_terminal_at_utc"] = utc()
             save_state(self.state, execution_id, state)
-            record = _result_record(state, response, f"Runs/{execution_id}/result.json")
-            result_sha, ref = self._publish_result(execution_id, record)
-            state["result_sha256"] = result_sha
-            state["result_ref"] = ref
-            state["phase"] = "CHM_PENDING"
-            save_state(self.state, execution_id, state)
-            self._status(execution_id, "CHM_PENDING", terminal_disposition=moh_state, result_sha256=result_sha)
+            self._resume_terminal_publication(state)
             return
         if moh_state in MOH_UNRESOLVED:
             state["phase"] = "MOH_IN_DOUBT"
+            state["moh_in_doubt_ever"] = True
             state["moh_in_doubt_response"] = response
             save_state(self.state, execution_id, state)
             self._status(execution_id, "MOH_IN_DOUBT", failure_code=response.get("failure_code"))

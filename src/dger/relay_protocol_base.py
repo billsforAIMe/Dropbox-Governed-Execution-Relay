@@ -53,6 +53,13 @@ class DgerError(RuntimeError):
 class SemanticGateway(Protocol):
     def doctor(self, tool_id: str, operation: str) -> dict[str, Any]: ...
     def invoke(self, tool_id: str, operation: str, arguments: dict[str, Any]) -> dict[str, Any]: ...
+    def invoke_frozen(
+        self,
+        tool_id: str,
+        operation: str,
+        arguments: dict[str, Any],
+        frozen_binding: dict[str, Any],
+    ) -> dict[str, Any]: ...
     def get_invocation(self, invocation_id: str) -> dict[str, Any]: ...
 
 

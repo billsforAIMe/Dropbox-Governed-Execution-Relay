@@ -67,5 +67,19 @@ class FakeGatewayOpsMixin:
                 return self._inv({"ok": True, "code": "HANDOFF_RESOLVED", "handoff_id": hid, "state": "RESOLVED"})
         raise AssertionError((tool_id, operation, arguments))
 
+    def invoke_frozen(self, tool_id: str, operation: str, arguments: dict, frozen_binding: dict):
+        current = self.bindings[(tool_id, "*")]
+        delivered = current["delivered_binding"]
+        expected = {
+            "authoritative_binding": current["authoritative_binding"],
+            "tool_identity": delivered["tool_identity"],
+            "tool_tree": delivered["tool_tree"],
+            "registry_identity": delivered["registry_identity"],
+        }
+        comparable = {key: frozen_binding.get(key) for key in expected}
+        if comparable != expected:
+            return {"ok": False, "code": "EXPECTED_BINDING_MISMATCH", "status": "rejected"}
+        return self.invoke(tool_id, operation, arguments)
+
     def get_invocation(self, invocation_id: str):
         raise NotImplementedError

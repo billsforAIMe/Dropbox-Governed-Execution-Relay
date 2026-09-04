@@ -33,7 +33,7 @@ Ingress/<execution_id>/
 
 For new work DGER uses GTG Doctor to resolve current callable bindings for MOH, CHM, and the consumer Tool/operation named by the MOH envelope. The consumer Doctor binding must equal the exact commit/tree/repository/selector in the envelope.
 
-Before any MOH-visible stage exists, DGER invokes CHM `handoff_get` for the supplied logical ID through the authenticated GTG project binding and requires a `STARTED` handoff with no existing result. Ingress never supplies a project or selects a GTG credential. DGER rechecks the exact CHM provider binding immediately after this read because current GTG invocation has no expected-release CAS.
+Before any MOH-visible stage exists, DGER must invoke CHM `handoff_get` for the supplied logical ID through an atomic frozen-binding gateway operation and require a `STARTED` handoff with no existing result. Ingress never supplies a project or selects a GTG credential. Doctor establishes the candidate binding; it does **not** by itself make later invocation atomic with respect to provider advancement.
 
 DGER then persists an immutable per-execution `intent_digest` over:
 
@@ -44,9 +44,9 @@ DGER then persists an immutable per-execution `intent_digest` over:
 - frozen CHM binding;
 - frozen consumer binding.
 
-An already accepted execution never re-resolves to a newer provider. A replay with the same `execution_id` but a changed intent fails `EXECUTION_ID_INTENT_CONFLICT`.
+An accepted execution retains its frozen provider identities in State. A replay with the same `execution_id` but a changed intent fails `EXECUTION_ID_INTENT_CONFLICT`.
 
-Because current GTG `invoke_tool` has no expected-release CAS argument, DGER conservatively Doctor-checks the frozen provider immediately before each semantic invocation. If that route advanced, DGER records/preserves recovery state and invokes nothing until the exact frozen route is callable again.
+DGER's semantic execution paths require an internal `invoke_frozen(tool_id, operation, arguments, frozen_binding)` gateway operation whose binding comparison is atomic with route selection and dispatch. Current authoritative GTG does not provide such an expected-binding/CAS field on `invoke_tool`. The production `GTGHttpGateway` therefore refuses `invoke_frozen` locally with `GTG_ATOMIC_BINDING_CAS_UNAVAILABLE` and sends no invocation. Doctor checks remain useful for discovery and diagnostics but are not claimed to close the Doctor→invoke TOCTOU race. Production activation is blocked until authoritative GTG exposes an atomic exact-binding invocation mechanism and the DGER adapter is bound to that published contract.
 
 After acceptance, recovery is driven by DGER State rather than continued presence of the external Dropbox package. The accepted request/envelope/payload are already frozen in private State, so later MOH reconciliation and CHM-only publication continue even if `Ingress/<execution_id>` is removed. If an ingress package remains or reappears, DGER still validates it against the frozen intent before treating it as an idempotent replay.
 
@@ -61,14 +61,16 @@ DGER first copies the immutable package to private DGER State, verifies read-bac
 
 The MOH final stage is published only after a complete verified temporary stage exists. DGER-owned unpublished temporary stages may be cleaned after crash. An existing final stage is never deleted or overwritten; it must verify byte/digest-exactly or DGER fails closed.
 
-After `MOH_STAGE_COMPLETE`, DGER invokes only:
+After `MOH_STAGE_COMPLETE`, DGER uses only the MOH semantic operations:
 
 ```text
 execute(execution_id)
 status(execution_id)
 ```
 
-If an `execute` response is ambiguous/lost, DGER next asks `status`. If MOH says `NOT_FOUND` **and DGER has never observed `IN_DOUBT` for that execution**, DGER may repeat `execute` for the same immutable execution ID. MOH owns admission/start uniqueness, so this recovery does not authorize a second blind host start. Once DGER has observed `IN_DOUBT`, it permanently relinquishes first-start authority for that execution ID: even a later `NOT_FOUND` can only remain unresolved and can never permit another `execute`.
+Before **every** `execute` attempt, DGER durably records `moh_execute_may_have_happened=true`, increments the execute-attempt counter, and moves phase to `MOH_RECONCILE`. Only after that write-ahead State is fsync-published may the gateway dispatch `execute`. A process or power loss after MOH receives the effect but before DGER receives or records its response therefore restarts in reconciliation and asks `status` rather than blindly executing again.
+
+If status later says `NOT_FOUND` and DGER has never observed `IN_DOUBT`, DGER may issue another write-ahead-protected `execute` for the same immutable execution ID; MOH still owns admission/start uniqueness. Once DGER has ever observed `IN_DOUBT`, it sets the monotonic `moh_in_doubt_ever=true` safety latch. Transport ambiguity or later phase changes cannot erase that latch. A later `NOT_FOUND` can only remain unresolved and can never permit another DGER `execute`.
 
 ## 4. State ordering
 
@@ -77,15 +79,15 @@ Per execution:
 ```text
 ACCEPTED
   -> MOH_STAGE_COMPLETE
-  -> MOH_RECONCILE
-       -> MOH_IN_DOUBT                 (unresolved; CHM not resolved)
-       -> MOH_TERMINAL
+  -> MOH_RECONCILE                     (durable before every execute dispatch)
+       -> MOH_IN_DOUBT                 (unresolved; monotonic no-execute latch)
+       -> MOH_TERMINAL                 (durable terminal truth)
   -> CHM_PENDING
   -> CHM_ATTACHED
   -> DONE
 ```
 
-Once `MOH_TERMINAL` is durable, DGER never returns to `execute`. CHM availability cannot cause host re-execution.
+Once `MOH_TERMINAL` is durable, DGER never returns to `execute`. `MOH_TERMINAL` is itself a resumable phase: restart regenerates/publishes the exact bounded result idempotently and advances to `CHM_PENDING`. CHM availability cannot cause host re-execution.
 
 `IN_DOUBT` is preserved and reconciled with MOH. It is not converted into success, does not resolve CHM, and permanently bars any later DGER `execute` for that execution ID.
 
@@ -118,8 +120,8 @@ If the envelope's consumer Tool is GEP, GEP remains the governed consumer/execut
 ## 7. Failure ordering
 
 - **Crash before complete MOH stage:** no `execute`; only DGER-owned unpublished temporary material may be cleaned.
-- **Crash after complete stage before execute receipt:** reconcile through MOH `status`/safe repeat `execute`.
-- **Crash after MOH terminal before CHM:** recover terminal DGER State/result and retry only CHM publication.
+- **Crash after complete stage / after execute dispatch but before receipt:** the durable execute-intent write-ahead phase is already `MOH_RECONCILE`; restart asks MOH `status` before any possible later execute.
+- **Crash after durable `MOH_TERMINAL` before result/CHM transition:** idempotently rebuild/publish the bounded result from stored terminal response, move to `CHM_PENDING`, and retry only CHM publication.
 - **Crash after attach before local acknowledgement:** replay exact `handoff_attach_result`, then resolve.
 - **CHM unavailable after MOH terminal:** preserve terminal truth; never rerun MOH.
 - **Same ID/altered bytes:** explicit identity-intent conflict.

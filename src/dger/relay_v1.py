@@ -39,6 +39,11 @@ class Relay(RelayRuntimeMixin, RelayAcceptMixin, RelayMohMixin, RelayChmMixin):
                 self._status(execution_id, "MOH_RECONCILIATION_BLOCKED", code=exc.code, detail=exc.detail[:512])
                 return True
             current = load_state(self.state, execution_id) or current
+        if current["phase"] == "MOH_TERMINAL":
+            # MOH_TERMINAL is intentionally durable before result/CHM publication.
+            # It is therefore a first-class restart phase, not a transient local detail.
+            self._resume_terminal_publication(current)
+            current = load_state(self.state, execution_id) or current
         if current["phase"] in {"CHM_PENDING", "CHM_ATTACHED"}:
             self._publish_chm(current)
         return True

@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
 suite = unittest.TestSuite()
-for name in ("test_relay_v1_core", "test_relay_v1_safety", "test_relay_v1_safety_more", "test_relay_v1_transport_recovery", "test_gtg_http"):
+for name in ("test_relay_v1_core", "test_relay_v1_safety", "test_relay_v1_safety_more", "test_relay_v1_transport_recovery", "test_review_corrections", "test_gtg_http"):
     suite.addTests(unittest.defaultTestLoader.loadTestsFromName(name))
 
 class ChangedLocationTests(unittest.TestCase):
