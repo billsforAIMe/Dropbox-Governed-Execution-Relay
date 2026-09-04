@@ -35,7 +35,7 @@ This model deliberately does not claim that an earlier Doctor observation is ato
 
 Once accepted, reconciliation is State-driven: removal of the external Dropbox ingress package cannot strand a running/ambiguous MOH execution or CHM-only publication. A retained/replayed ingress package is still checked against the immutable accepted intent.
 
-As of the Generation-3 delivery work, authoritative CHM Generation 10 exposes the required stable logical lifecycle, and authoritative GTG Generation 17 preserves the exact identity-attestation semantics introduced in Generation 16. Production activation must still verify those capabilities are actually deployed and callable in the target environment; DGER fails closed if required operations or successful-call identity attestation are unavailable.
+As of the Generation-3 delivery work, authoritative CHM Generation 10 exposes the required stable logical lifecycle, and authoritative GTG Generation 18 preserves the exact identity-attestation semantics introduced in Generation 16. Production activation must still verify those capabilities are actually deployed and callable in the target environment; DGER fails closed if required operations or successful-call identity attestation are unavailable.
 
 ## Protocol
 
