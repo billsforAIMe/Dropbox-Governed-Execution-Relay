@@ -1,5 +1,6 @@
 from pathlib import Path
 import tempfile
+import unittest
 
 from dger.phase1 import (
     ACKNOWLEDGED,
@@ -97,60 +98,62 @@ class FakeWake:
         self.events.append(event)
 
 
-def _run_crash(point):
-    chm, gep, wake = FakeCHM(), FakeGEP(), FakeWake()
-    seen = False
+class Phase1RelayTests(unittest.TestCase):
+    def _run_crash(self, point):
+        chm, gep, wake = FakeCHM(), FakeGEP(), FakeWake()
+        seen = False
 
-    def hook(current):
-        nonlocal seen
-        if current == point and not seen:
-            seen = True
-            raise CrashInjected(point)
+        def hook(current):
+            nonlocal seen
+            if current == point and not seen:
+                seen = True
+                raise CrashInjected(point)
 
-    with tempfile.TemporaryDirectory() as td:
-        relay = Phase1Relay(Path(td), chm, gep, wake, hook)
-        try:
+        with tempfile.TemporaryDirectory() as td:
+            relay = Phase1Relay(Path(td), chm, gep, wake, hook)
+            with self.assertRaises(CrashInjected):
+                relay.process(HANDOFF)
+            relay.crash_hook = None
             relay.process(HANDOFF)
-        except CrashInjected:
-            pass
-        relay.crash_hook = None
-        relay.process(HANDOFF)
-        assert gep.start_calls <= 1
-        outbox = load_json(relay._outbox_path(EXECUTION))
-        if chm.terminal is not None:
-            assert outbox is not None
-            assert outbox["phase"] in {DELIVERY_REQUIRED, ACKNOWLEDGED}
-        if outbox is not None:
-            relay.deliver(EXECUTION)
-            assert gep.start_calls <= 1
+            self.assertLessEqual(gep.start_calls, 1)
+            outbox = load_json(relay._outbox_path(EXECUTION))
+            if chm.terminal is not None:
+                self.assertIsNotNone(outbox)
+                self.assertIn(outbox["phase"], {DELIVERY_REQUIRED, ACKNOWLEDGED})
+            if outbox is not None:
+                relay.deliver(EXECUTION)
+                self.assertLessEqual(gep.start_calls, 1)
+
+    def test_crash_matrix_never_second_launch_or_orphan_terminal(self):
+        for point in (
+            "after_request_receipt",
+            "after_capacity_allocation",
+            "before_gep_start_request",
+            "after_gep_start_request",
+            "after_gep_terminal_truth",
+            "before_outbox_pending",
+            "after_outbox_pending_before_chm_publication",
+            "after_chm_publication_before_delivery_state",
+            "during_wake",
+            "after_wake_before_acknowledgment",
+        ):
+            with self.subTest(crash_point=point):
+                self._run_crash(point)
+
+    def test_uncertain_blocks_capacity_and_never_starts(self):
+        class UncertainGEP(FakeGEP):
+            def reconcile(self, descriptor):
+                return {"status": "UNCERTAIN", "execution_id": EXECUTION, "descriptor_digest": DESCRIPTOR_DIGEST}
+
+            def start(self, descriptor):
+                raise AssertionError("start must not be called from UNCERTAIN recovery")
+
+        with tempfile.TemporaryDirectory() as td:
+            chm, wake = FakeCHM(), FakeWake()
+            relay = Phase1Relay(Path(td), chm, UncertainGEP(), wake)
+            self.assertEqual(relay.process(HANDOFF)["status"], "UNCERTAIN")
+            self.assertIn("BLOCKED", chm.statuses)
 
 
-def test_crash_matrix_never_second_launch_or_orphan_terminal():
-    for point in (
-        "after_request_receipt",
-        "after_capacity_allocation",
-        "before_gep_start_request",
-        "after_gep_start_request",
-        "after_gep_terminal_truth",
-        "before_outbox_pending",
-        "after_outbox_pending_before_chm_publication",
-        "after_chm_publication_before_delivery_state",
-        "during_wake",
-        "after_wake_before_acknowledgment",
-    ):
-        _run_crash(point)
-
-
-def test_uncertain_blocks_capacity_and_never_starts():
-    class UncertainGEP(FakeGEP):
-        def reconcile(self, descriptor):
-            return {"status": "UNCERTAIN", "execution_id": EXECUTION, "descriptor_digest": DESCRIPTOR_DIGEST}
-
-        def start(self, descriptor):
-            raise AssertionError("start must not be called from UNCERTAIN recovery")
-
-    with tempfile.TemporaryDirectory() as td:
-        chm, wake = FakeCHM(), FakeWake()
-        relay = Phase1Relay(Path(td), chm, UncertainGEP(), wake)
-        assert relay.process(HANDOFF)["status"] == "UNCERTAIN"
-        assert "BLOCKED" in chm.statuses
+if __name__ == "__main__":
+    unittest.main()
