@@ -59,6 +59,60 @@ class GTGHttpTests(unittest.TestCase):
         with patch("dger.gtg_http.urlopen", side_effect=response_for):
             self.assertEqual({"ok": True, "value": 1}, gateway.doctor("tool", "operation"))
 
+    def test_invoke_requires_exact_success_attestation(self):
+        gateway = GTGHttpGateway("https://gtg.invalid/mcp", self.token)
+        def response_for(request, timeout):
+            body = json.loads(request.data)
+            tool_id = body["params"]["arguments"]["tool_id"]
+            result = {
+                "code": "INVOKE_TOOL_OK",
+                "ok": True,
+                "invocation_id": "inv_" + "1" * 32,
+                "status": "completed",
+                "result": {"ok": True},
+                "identity_attestation": {
+                    "tool_identity": "1" * 40,
+                    "tool_tree": "2" * 40,
+                    "gtg_identity": "3" * 40,
+                },
+                "evidence": {
+                    "tool_id": tool_id,
+                    "tool_identity": "1" * 40,
+                    "registry_identity": "4" * 40,
+                },
+            }
+            payload = json.dumps({
+                "jsonrpc": "2.0", "id": body["id"],
+                "result": {"structuredContent": result},
+            }).encode()
+            return _Response(payload)
+        with patch("dger.gtg_http.urlopen", side_effect=response_for):
+            value = gateway.invoke("mac-operation-host", "status", {"execution_id": "e"})
+            self.assertEqual(value["identity_attestation"]["tool_identity"], "1" * 40)
+
+        def missing_for(request, timeout):
+            body = json.loads(request.data)
+            result = {
+                "code": "INVOKE_TOOL_OK",
+                "ok": True,
+                "invocation_id": "inv_" + "2" * 32,
+                "status": "completed",
+                "result": {"ok": True},
+                "evidence": {
+                    "tool_id": "mac-operation-host",
+                    "tool_identity": "1" * 40,
+                    "registry_identity": "4" * 40,
+                },
+            }
+            payload = json.dumps({
+                "jsonrpc": "2.0", "id": body["id"],
+                "result": {"structuredContent": result},
+            }).encode()
+            return _Response(payload)
+        with patch("dger.gtg_http.urlopen", side_effect=missing_for):
+            with self.assertRaisesRegex(GTGHttpError, "GTG_IDENTITY_ATTESTATION_REQUIRED"):
+                gateway.invoke("mac-operation-host", "status", {"execution_id": "e"})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
