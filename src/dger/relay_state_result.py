@@ -14,6 +14,7 @@ from .relay_protocol import (
     payload_manifest, read_json_regular, read_regular, sha256, validate_moh_envelope,
 )
 
+
 def _unwrap_gtg_result(value: dict[str, Any], expected_tool: str, expected_operation: str) -> tuple[dict[str, Any] | None, str | None]:
     invocation_id = value.get("invocation_id") if isinstance(value.get("invocation_id"), str) else None
     if value.get("ok") is True and isinstance(value.get("result"), dict):
@@ -55,6 +56,15 @@ def _compact_moh_evidence(response: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _provider_evidence(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "acceptance_doctor_observation": state.get("moh_binding"),
+        "execute_invocation_attestation": state.get("moh_execute_attestation"),
+        "terminal_invocation_attestation": state.get("moh_terminal_attestation"),
+        "terminal_observed_via": state.get("moh_terminal_observed_via"),
+    }
+
+
 def _result_record(state: dict[str, Any], moh_response: dict[str, Any], evidence_ref: str) -> dict[str, Any]:
     envelope = state["envelope"]
     return {
@@ -73,7 +83,7 @@ def _result_record(state: dict[str, Any], moh_response: dict[str, Any], evidence
             "operation_contract_digest": envelope["operation_contract_digest"],
             "closure_digest": envelope["closure_digest"],
         },
-        "moh_binding": state["moh_binding"],
+        "moh_provider_evidence": _provider_evidence(state),
         "moh_execution": _compact_moh_evidence(moh_response),
         "bounded_result_reference": evidence_ref,
         "completed_at_utc": state["moh_terminal_at_utc"],
@@ -98,6 +108,9 @@ def _chm_result(state: dict[str, Any], result_sha: str, evidence_ref: str) -> di
             "request_digest": state["moh_terminal_response"].get("request_digest"),
             "receipt_digest": state["moh_terminal_response"].get("receipt_digest"),
             "result_digest": state["moh_terminal_response"].get("result_digest"),
+            "execute_invocation_attestation": state.get("moh_execute_attestation"),
+            "terminal_invocation_attestation": state.get("moh_terminal_attestation"),
+            "terminal_observed_via": state.get("moh_terminal_observed_via"),
         },
         "result_evidence_digest": result_sha,
         "bounded_result_reference": evidence_ref,
