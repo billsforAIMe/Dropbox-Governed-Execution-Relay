@@ -6,16 +6,9 @@
   "contract_schema_major": null,
   "governance_compatibility": {
     "authority_id": "software-governance",
-    "governance_contract_major_allowed": [
-      2
-    ],
-    "manifest_schema_major_allowed": [
-      1
-    ],
-    "release_generation": {
-      "max": null,
-      "min": 7
-    },
+    "governance_contract_major_allowed": [2],
+    "manifest_schema_major_allowed": [1],
+    "release_generation": {"max": null, "min": 7},
     "required_capabilities": [
       "authority-channel-binding-v2",
       "governed-tool-consumer-contract-v2",
@@ -27,7 +20,7 @@
   },
   "manifest_schema_major": 1,
   "normative_files": [],
-  "release_generation": 2,
+  "release_generation": 3,
   "release_selector_contract": {
     "ancestry_preserving_forward_cas": true,
     "delivered_objects_remain_reachable": true,
@@ -37,10 +30,10 @@
   "rolls_back_to_generation": null,
   "runtime_compatibility": {
     "compatible_runtime_commits": [],
-    "note": "This release changes the runtime external-binding interface; no earlier installed runtime is declared compatible.",
+    "note": "Generation 3 adds the Phase-1 reconcile-first relay with CHM atomic capacity recovery, RUNNING-to-BLOCKED uncertainty, GEP-anchored uncertainty publication, write-ahead durable completion outbox, terminal-delivery-only recovery, advisory wake, and exact installed GEP Phase-1 launcher binding while retaining R0 compatibility.",
     "policy": "exact_or_explicit_immutable_tool_release_declaration"
   },
-  "supersedes_generation": 1,
+  "supersedes_generation": 2,
   "tool_id": "dropbox-governed-execution-relay",
   "withdrawn_generations": []
 }

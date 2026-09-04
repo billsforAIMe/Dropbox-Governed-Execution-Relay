@@ -7,6 +7,7 @@ SHA=$(/usr/bin/plutil -extract candidate_sha raw -o - "$IDENTITY" 2>/dev/null ||
 RUNTIME=$(/usr/bin/plutil -extract runtime_root raw -o - "$IDENTITY" 2>/dev/null || true)
 [[ ${#SHA} -eq 40 && "$SHA" != *[^0-9a-f]* && -d "$RUNTIME" && ! -L "$RUNTIME" ]] || { echo 'DGER_DELIVERED_IDENTITY_INVALID' >&2; exit 70; }
 GEP_BARE="$HOME/ChatGPT/Git/Tools/Governed Execution Platform.git"
+GEP_PHASE1="$HOME/ChatGPT/Installed/Tools/Governed Execution Platform/phase1/gep-phase1"
 PYRUNWAY='/usr/local/bin/pyrunway'
 CHM='/usr/local/bin/handoff-manager'
 CLOUD_STORAGE="$HOME/Library/CloudStorage"
@@ -24,10 +25,13 @@ done
 TRANSPORT="$DROPBOX_ROOT/Software/Dropbox Governed Execution Relay/V1"
 [[ ! -L "$TRANSPORT" ]] || { echo 'DGER_TRANSPORT_BINDING_UNSAFE' >&2; exit 70; }
 [[ -d "$GEP_BARE" && ! -L "$GEP_BARE" ]] || { echo 'DGER_GEP_BINDING_UNAVAILABLE' >&2; exit 70; }
+[[ -x "$GEP_PHASE1" && ! -L "$GEP_PHASE1" ]] || { echo 'DGER_GEP_PHASE1_BINDING_UNAVAILABLE' >&2; exit 70; }
 [[ -x "$PYRUNWAY" && ! -L "$PYRUNWAY" && -x "$CHM" && ! -L "$CHM" ]] || { echo 'DGER_EXECUTABLE_BINDING_UNAVAILABLE' >&2; exit 70; }
 exec env PYRUNWAY_STRICT=1 PYTHONDONTWRITEBYTECODE=1 "$PYRUNWAY" --standalone "$RUNTIME/scripts/dger.py" \
   --transport-root "$TRANSPORT" \
   --state-root "$STATE" \
   --gep-bare "$GEP_BARE" \
   --pyrunway "$PYRUNWAY" \
-  --handoff-manager "$CHM"
+  --handoff-manager "$CHM" \
+  --phase1-gep-launcher "$GEP_PHASE1" \
+  --phase1-principal-git-identity "$SHA"
