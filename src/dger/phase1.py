@@ -85,6 +85,7 @@ class CHMClient(Protocol):
     def acquire_capacity(self, execution_id: str) -> dict[str, Any]: ...
     def bind_capacity(self, handoff_id: str, execution_id: str, slot: str, allocation_id: str) -> dict[str, Any]: ...
     def capacity_status(self, slot: str, allocation_id: str, status: str) -> dict[str, Any]: ...
+    def publish_uncertain(self, handoff_id: str, proof: dict[str, Any]) -> dict[str, Any]: ...
     def publish_terminal(self, handoff_id: str, proof: dict[str, Any]) -> dict[str, Any]: ...
 
 
@@ -134,17 +135,41 @@ class Phase1Relay:
         if isinstance(existing, dict):
             return {"slot": existing["slot"], "allocation_id": existing["allocation_id"]}
         execution_id = handoff["execution_id"]
-        matches = [s for s in self.chm.active_capacity() if s.get("task") == execution_id]
-        if len(matches) > 1:
-            raise RelayPhase1Error("CAPACITY_RECONCILIATION_CONFLICT")
-        if matches:
-            allocation = {"slot": matches[0]["slot"], "allocation_id": matches[0]["allocation_id"]}
-        else:
-            acquired = self.chm.acquire_capacity(execution_id)
-            allocation = {"slot": acquired["slot"], "allocation_id": acquired["allocation_id"]}
+        # CHM acquire_capacity is Phase-1 acquire-once: the scan/recover/acquire
+        # decision is atomic under CHM's execution-pool lock.
+        acquired = self.chm.acquire_capacity(execution_id)
+        allocation = {"slot": acquired["slot"], "allocation_id": acquired["allocation_id"]}
+        if acquired.get("changed"):
             self._crash("after_capacity_allocation")
         self.chm.bind_capacity(handoff["handoff_id"], execution_id, allocation["slot"], allocation["allocation_id"])
         return allocation
+
+    def _capacity_state(self, allocation: Mapping[str, str]) -> str:
+        matches = [
+            s for s in self.chm.active_capacity()
+            if s.get("slot") == allocation["slot"] and s.get("allocation_id") == allocation["allocation_id"]
+        ]
+        if len(matches) != 1:
+            raise RelayPhase1Error("CAPACITY_ALLOCATION_NOT_ACTIVE")
+        status = matches[0].get("status")
+        if status not in {"RESERVED", "RUNNING", "BLOCKED"}:
+            raise RelayPhase1Error("CAPACITY_STATE_INVALID")
+        return str(status)
+
+    def _ensure_running(self, allocation: Mapping[str, str]) -> str:
+        status = self._capacity_state(allocation)
+        if status == "RESERVED":
+            self.chm.capacity_status(allocation["slot"], allocation["allocation_id"], "RUNNING")
+            status = "RUNNING"
+        return status
+
+    def _ensure_blocked(self, allocation: Mapping[str, str]) -> None:
+        status = self._capacity_state(allocation)
+        if status == "RUNNING":
+            self.chm.capacity_status(allocation["slot"], allocation["allocation_id"], "BLOCKED")
+            return
+        if status != "BLOCKED":
+            raise RelayPhase1Error("CAPACITY_BLOCKING_STATE_INVALID")
 
     def _proof_from_gep(self, descriptor: dict[str, Any], gep: dict[str, Any]) -> dict[str, Any]:
         required = ("execution_id", "descriptor_digest", "status", "result_manifest_reference", "result_manifest_digest")
@@ -152,6 +177,14 @@ class Phase1Relay:
             raise RelayPhase1Error("GEP_TERMINAL_INCOMPLETE")
         if gep["execution_id"] != descriptor["execution_id"] or gep["status"] not in TERMINAL:
             raise RelayPhase1Error("GEP_TERMINAL_CORRELATION_CONFLICT")
+        return {k: gep[k] for k in required}
+
+    def _uncertain_proof_from_gep(self, descriptor: dict[str, Any], gep: dict[str, Any]) -> dict[str, Any]:
+        required = ("execution_id", "descriptor_digest", "status", "start_intent_reference", "start_intent_digest")
+        if any(k not in gep for k in required):
+            raise RelayPhase1Error("GEP_UNCERTAIN_INCOMPLETE")
+        if gep["execution_id"] != descriptor["execution_id"] or gep["status"] != "UNCERTAIN":
+            raise RelayPhase1Error("GEP_UNCERTAIN_CORRELATION_CONFLICT")
         return {k: gep[k] for k in required}
 
     def _ensure_outbox_pending(self, handoff: dict[str, Any], proof: dict[str, Any]) -> dict[str, Any]:
@@ -195,16 +228,25 @@ class Phase1Relay:
         self._crash("after_request_receipt")
 
         allocation = self._find_or_acquire_capacity(handoff)
-        self._save_execution(execution_id, {"handoff_id": handoff_id, "execution_id": execution_id, "descriptor_digest": handoff["execution_descriptor_digest"], "phase": "CAPACITY_RESERVED", **allocation})
+        capacity_state = self._ensure_running(allocation)
+        self._save_execution(execution_id, {"handoff_id": handoff_id, "execution_id": execution_id, "descriptor_digest": handoff["execution_descriptor_digest"], "phase": "CAPACITY_RUNNING" if capacity_state == "RUNNING" else "CAPACITY_BLOCKED", **allocation})
 
         gep = self.gep.reconcile(descriptor)
         if gep.get("status") in {"ABSENT", "NOT_STARTED"}:
+            if capacity_state == "BLOCKED":
+                raise RelayPhase1Error("BLOCKED_CAPACITY_CANNOT_START")
             self._crash("before_gep_start_request")
             gep = self.gep.start(descriptor)
             self._crash("after_gep_start_request")
         if gep.get("status") == "UNCERTAIN":
-            self.chm.capacity_status(allocation["slot"], allocation["allocation_id"], "BLOCKED")
-            self._save_execution(execution_id, {"handoff_id": handoff_id, "execution_id": execution_id, "descriptor_digest": handoff["execution_descriptor_digest"], "phase": "UNCERTAIN", **allocation})
+            self._ensure_blocked(allocation)
+            proof = self._uncertain_proof_from_gep(descriptor, gep)
+            self._save_execution(execution_id, {"handoff_id": handoff_id, "execution_id": execution_id, "descriptor_digest": handoff["execution_descriptor_digest"], "phase": "UNCERTAIN", "uncertain_proof": proof, **allocation})
+            published = self.chm.publish_uncertain(handoff_id, proof)
+            if published.get("status") in TERMINAL:
+                return {"status": published["status"], "execution_id": execution_id, "handoff_id": handoff_id}
+            if published.get("status") != "UNCERTAIN" or published.get("uncertain_result", {}).get("descriptor_digest") != proof["descriptor_digest"]:
+                raise RelayPhase1Error("CHM_UNCERTAIN_VERIFICATION_FAILED")
             return {"status": "UNCERTAIN", "execution_id": execution_id, "handoff_id": handoff_id}
         if gep.get("status") not in TERMINAL:
             return {"status": "PENDING", "execution_id": execution_id, "handoff_id": handoff_id}
