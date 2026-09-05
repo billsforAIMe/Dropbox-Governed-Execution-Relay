@@ -2,12 +2,12 @@
   "schema_version": 1,
   "project_id": "dropbox-governed-execution-relay",
   "repository_id": "dropbox-governed-execution-relay",
-  "deployment_root": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay",
-  "state_root": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay",
-  "backup_root": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay/DEPLOYMENT/backups",
-  "evidence_root": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay/DEPLOYMENT/evidence",
+  "deployment_root": "/Users/brettmacpro/AI/State/Tools/Dropbox Governed Execution Relay",
+  "state_root": "/Users/brettmacpro/AI/State/Tools/Dropbox Governed Execution Relay",
+  "backup_root": "/Users/brettmacpro/AI/State/Tools/Dropbox Governed Execution Relay/DEPLOYMENT/backups",
+  "evidence_root": "/Users/brettmacpro/AI/State/Tools/Dropbox Governed Execution Relay/DEPLOYMENT/evidence",
   "adapter": {
-    "executable": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay/deployment-control/dger_god_adapter.py",
+    "executable": "/Users/brettmacpro/AI/State/Tools/Dropbox Governed Execution Relay/deployment-control/dger_god_adapter.py",
     "sha256": "__ADAPTER_SHA256__"
   },
   "limits": {
