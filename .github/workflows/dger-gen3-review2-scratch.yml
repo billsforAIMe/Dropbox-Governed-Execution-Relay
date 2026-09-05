@@ -1,0 +1,26 @@
+name: DGER Gen3 Review2 Scratch
+
+on:
+  push:
+    branches:
+      - builder/dger-gen3-review2-corrections
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Syntax
+        run: python -m py_compile deployment/dger_god_adapter.py tests/test_god_deployment_binding.py tests/test_god_deployment_rollback_crash.py
+      - name: Rollback crash falsification
+        run: python tests/test_god_deployment_rollback_crash.py -v
+      - name: Existing deployment binding suite
+        run: python tests/test_god_deployment_binding.py -v
+      - name: Full portable suite
+        run: python tests/run_all.py
