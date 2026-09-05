@@ -222,7 +222,7 @@ class BindingTests(unittest.TestCase):
         self.assertEqual(profile["repository_id"], "dropbox-governed-execution-relay")
         self.assertEqual(profile["adapter"]["sha256"], adapter_sha)
         self.assertEqual(profile["runtime_accounting"]["stop_required_ids"], [adapter.RUNTIME_ID])
-        self.assertEqual(profile["derived_surfaces"], [])
+        self.assertNotIn("derived_surfaces", profile)
         source_paths = {item["source_path"] for item in profile["surface"]}
         self.assertEqual(len(source_paths), 24)
         self.assertIn("GOVERNED_RELEASE.json", source_paths)
