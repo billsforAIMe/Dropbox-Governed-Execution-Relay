@@ -553,7 +553,12 @@ def _restore_predecessor(state: dict) -> None:
     snapshots = state.get("snapshots")
     if not isinstance(snapshots, dict):
         raise RuntimeError("adapter predecessor snapshots unavailable")
-    for key, path in (("delivered_identity", DELIVERED_IDENTITY), ("runtime_binding", RUNTIME_BINDING), ("live_plist", LIVE_PLIST)):
+    for key, path in (
+        ("delivered_identity", DELIVERED_IDENTITY),
+        ("runtime_binding", RUNTIME_BINDING),
+        ("live_plist", LIVE_PLIST),
+        ("gtg_token_file", TOKEN_FILE),
+    ):
         snap = snapshots.get(key)
         if not isinstance(snap, dict):
             raise RuntimeError(f"adapter predecessor snapshot unavailable: {key}")
@@ -616,6 +621,7 @@ def main(argv: list[str]) -> int:
                         "delivered_identity": _snapshot(DELIVERED_IDENTITY),
                         "runtime_binding": _snapshot(RUNTIME_BINDING),
                         "live_plist": _snapshot(LIVE_PLIST),
+                        "gtg_token_file": _snapshot(TOKEN_FILE),
                     },
                 }
                 _write_adapter_state(state_path, state)
