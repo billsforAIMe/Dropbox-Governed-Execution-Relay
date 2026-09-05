@@ -11,14 +11,14 @@ from .relay_protocol import (
     CHM_TOOL_ID, DgerError, EXECUTION_ID_RE, EXPECTED_INTERVAL_SECONDS, MAX_ENVELOPE_BYTES,
     MAX_MOH_RESPONSE_BYTES, MAX_REQUEST_BYTES, MAX_RESULT_RECORD_BYTES, MOH_TERMINAL_PUBLISHABLE,
     MOH_TOOL_ID, MOH_UNRESOLVED, PROTOCOL, READY_SCHEMA, REQUEST_SCHEMA, REQUIRED_CHM_OPERATIONS,
-    SemanticGateway, _intent_digest, _json_object_no_duplicates, _safe_rel, _validate_consumer_binding,
-    _validate_ready, _validate_request, atomic_bytes, atomic_json, canonical_bytes,
-    canonical_digest, canonical_file_bytes, moh_closure_digest, payload_manifest, read_json_regular,
-    read_regular, resolve_tool_binding, sha256, utc, validate_moh_envelope,
+    SemanticGateway, _intent_digest, _invocation_attestation, _json_object_no_duplicates, _safe_rel,
+    _validate_consumer_binding, _validate_ready, _validate_request, atomic_bytes, atomic_json,
+    canonical_bytes, canonical_digest, canonical_file_bytes, moh_closure_digest, payload_manifest,
+    read_json_regular, read_regular, resolve_tool_binding, sha256, utc, validate_moh_envelope,
 )
 from .relay_state import (
-    _chm_result, _result_record, _safe_execution_dir, _stage_digest, _unwrap_gtg_result, _validate_moh_response, freeze_ingress,
-    load_state, materialize_moh_stage, save_state,
+    _chm_result, _result_record, _safe_execution_dir, _stage_digest, _unwrap_gtg_result,
+    _validate_moh_response, freeze_ingress, load_state, materialize_moh_stage, save_state,
 )
 
 
@@ -38,12 +38,10 @@ class RelayMohInvokeMixin:
             state["moh_execute_intent_at_utc"] = utc()
         save_state(self.state, execution_id, state)
         try:
-            self._verify_frozen_binding(state, "moh_binding", MOH_TOOL_ID, operation)
-            wrapped = self.gateway.invoke_frozen(
+            wrapped = self.gateway.invoke(
                 MOH_TOOL_ID,
                 operation,
                 {"execution_id": execution_id},
-                state["moh_binding"],
             )
         except Exception as exc:
             state["last_moh_transport_error"] = str(exc)[:512]
@@ -62,6 +60,25 @@ class RelayMohInvokeMixin:
             save_state(self.state, execution_id, state)
             self._status(execution_id, "MOH_RESPONSE_AMBIGUOUS", operation=operation, invocation_id=invocation_id)
             return None
+        try:
+            attestation = _invocation_attestation(wrapped, MOH_TOOL_ID, operation)
+        except DgerError as exc:
+            # A successful Tool result without exact GTG identity attestation is not
+            # trusted as a completed semantic observation. For execute this remains
+            # reconcile-only because the effect may already have happened.
+            state["last_moh_attestation_error"] = {"code": exc.code, "detail": exc.detail[:512]}
+            state["phase"] = "MOH_IN_DOUBT" if state.get("moh_in_doubt_ever") is True else "MOH_RECONCILE"
+            save_state(self.state, execution_id, state)
+            self._status(execution_id, "MOH_ATTESTATION_UNAVAILABLE", operation=operation, code=exc.code)
+            return None
+        state["last_moh_attestation"] = attestation
+        state["last_moh_operation"] = operation
+        if operation == "execute":
+            state["moh_execute_attestation"] = attestation
+        else:
+            state["moh_status_attestation"] = attestation
+        save_state(self.state, execution_id, state)
+
         response_json = result.get("response_json")
         if not isinstance(response_json, str) or len(response_json.encode("utf-8")) > MAX_MOH_RESPONSE_BYTES:
             raise DgerError("MOH_GATEWAY_RESULT_INVALID")
@@ -97,6 +114,8 @@ class RelayMohInvokeMixin:
             state["moh_terminal_state"] = moh_state
             state["moh_terminal_response"] = response
             state["moh_terminal_at_utc"] = utc()
+            state["moh_terminal_attestation"] = state.get("last_moh_attestation")
+            state["moh_terminal_observed_via"] = state.get("last_moh_operation")
             save_state(self.state, execution_id, state)
             self._resume_terminal_publication(state)
             return

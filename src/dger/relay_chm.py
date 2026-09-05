@@ -11,15 +11,16 @@ from .relay_protocol import (
     CHM_TOOL_ID, DgerError, EXECUTION_ID_RE, EXPECTED_INTERVAL_SECONDS, MAX_ENVELOPE_BYTES,
     MAX_MOH_RESPONSE_BYTES, MAX_REQUEST_BYTES, MAX_RESULT_RECORD_BYTES, MOH_TERMINAL_PUBLISHABLE,
     MOH_TOOL_ID, MOH_UNRESOLVED, PROTOCOL, READY_SCHEMA, REQUEST_SCHEMA, REQUIRED_CHM_OPERATIONS,
-    SemanticGateway, _intent_digest, _json_object_no_duplicates, _safe_rel, _validate_consumer_binding,
-    _validate_ready, _validate_request, atomic_bytes, atomic_json, canonical_bytes,
-    canonical_digest, canonical_file_bytes, moh_closure_digest, payload_manifest, read_json_regular,
-    read_regular, resolve_tool_binding, sha256, utc, validate_moh_envelope,
+    SemanticGateway, _intent_digest, _invocation_attestation, _json_object_no_duplicates, _safe_rel,
+    _validate_consumer_binding, _validate_ready, _validate_request, atomic_bytes, atomic_json,
+    canonical_bytes, canonical_digest, canonical_file_bytes, moh_closure_digest, payload_manifest,
+    read_json_regular, read_regular, resolve_tool_binding, sha256, utc, validate_moh_envelope,
 )
 from .relay_state import (
-    _chm_result, _result_record, _safe_execution_dir, _stage_digest, _unwrap_gtg_result, _validate_moh_response, freeze_ingress,
-    load_state, materialize_moh_stage, save_state,
+    _chm_result, _result_record, _safe_execution_dir, _stage_digest, _unwrap_gtg_result,
+    _validate_moh_response, freeze_ingress, load_state, materialize_moh_stage, save_state,
 )
+
 
 class RelayChmMixin:
     def _publish_chm(self, state: dict[str, Any]) -> None:
@@ -38,18 +39,20 @@ class RelayChmMixin:
             if state["phase"] == "CHM_PENDING":
                 state["chm_publish_calls"] = int(state.get("chm_publish_calls", 0)) + 1
                 save_state(self.state, execution_id, state)
-                self._verify_frozen_binding(state, "chm_binding", CHM_TOOL_ID, "handoff_attach_result")
-                wrapped = self.gateway.invoke_frozen(
+                wrapped = self.gateway.invoke(
                     CHM_TOOL_ID,
                     "handoff_attach_result",
                     {"handoff_id": handoff_id, "result": chm_result},
-                    state["chm_binding"],
                 )
                 result, invocation_id = _unwrap_gtg_result(wrapped, CHM_TOOL_ID, "handoff_attach_result")
                 if invocation_id:
                     state["last_chm_invocation_id"] = invocation_id
                 if result is None:
                     raise DgerError("CHM_ATTACH_AMBIGUOUS", str(wrapped.get("code", "")))
+                state["chm_attach_attestation"] = _invocation_attestation(
+                    wrapped, CHM_TOOL_ID, "handoff_attach_result"
+                )
+                save_state(self.state, execution_id, state)
                 if result.get("ok") is not True:
                     code = str(result.get("code", "CHM_ATTACH_FAILED"))
                     if code == "HANDOFF_RESULT_CONFLICT":
@@ -63,22 +66,31 @@ class RelayChmMixin:
                 save_state(self.state, execution_id, state)
                 self._status(execution_id, "CHM_RESULT_ATTACHED")
 
-            self._verify_frozen_binding(state, "chm_binding", CHM_TOOL_ID, "handoff_resolve")
-            wrapped = self.gateway.invoke_frozen(
+            wrapped = self.gateway.invoke(
                 CHM_TOOL_ID,
                 "handoff_resolve",
                 {"handoff_id": handoff_id},
-                state["chm_binding"],
             )
             result, invocation_id = _unwrap_gtg_result(wrapped, CHM_TOOL_ID, "handoff_resolve")
             if invocation_id:
                 state["last_chm_invocation_id"] = invocation_id
-            if result is None or result.get("ok") is not True:
+            if result is None:
                 raise DgerError("CHM_RESOLVE_AMBIGUOUS", str(wrapped.get("code", "")))
+            state["chm_resolve_attestation"] = _invocation_attestation(
+                wrapped, CHM_TOOL_ID, "handoff_resolve"
+            )
+            save_state(self.state, execution_id, state)
+            if result.get("ok") is not True:
+                raise DgerError("CHM_RESOLVE_AMBIGUOUS", str(result.get("code", "")))
             state["phase"] = "DONE"
             state["completed_at_utc"] = utc()
             save_state(self.state, execution_id, state)
-            self._status(execution_id, "DONE", terminal_disposition=state["moh_terminal_state"], result_sha256=state["result_sha256"])
+            self._status(
+                execution_id,
+                "DONE",
+                terminal_disposition=state["moh_terminal_state"],
+                result_sha256=state["result_sha256"],
+            )
         except DgerError as exc:
             if state.get("phase") != "CHM_RESULT_CONFLICT":
                 state["last_chm_error"] = str(exc)[:512]
