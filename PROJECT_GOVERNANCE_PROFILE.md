@@ -36,6 +36,8 @@ Governed Python assurance uses authoritative PyRunway. Ambient/system Python may
 
 Material Mac activation is governed deployment work. Use the current bound Governed Offline Deployer/GTG path when available; do not replace it with ad-hoc shell installation. Quiesce the existing LaunchAgent, prove exact predecessor/runtime identity, deploy atomically, verify, then reactivate. Preserve rollback to the exact predecessor runtime until post-activation verification passes.
 
+Generation 3 binds that lifecycle through `deployment/dger_god_adapter.py` and the data-only `deployment/god_profile.template.json`. The adapter SHA-256 is substituted mechanically into exactly one template placeholder when the exact reviewed adapter bytes are materialized into DGER Tool State; the rendered profile is then hash-pinned for GOD invocation. The adapter uses the launchd service identity as lifecycle-control authority, never PID-only signaling, and restores predecessor non-secret binding/plist state on GOD rollback quiescence.
+
 ## SG11 semantic-access classification
 
 DGER is explicitly classified by current Tool Registry semantic-access metadata as `SUBSTRATE`, exception class `transport`: an immutable transport/recovery relay beneath normal semantic Tool business logic when the direct governed path is unavailable. Generation 3 preserves that narrow exception. DGER does not become the business-semantic front door for MOH, CHM, or consumer Tools; those Tool-owned capabilities remain resolved and invoked through GTG/GTC. The Dropbox transport never establishes software authority, semantic truth, permission, or execution truth.
