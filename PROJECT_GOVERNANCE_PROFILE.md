@@ -5,7 +5,7 @@
 - Tool ID: `dropbox-governed-execution-relay`
 - Software authority: private GitHub repository `billsforAIMe/Dropbox-Governed-Execution-Relay`, repository ID `1351496555`, selector `refs/heads/main`.
 - Tool Registry is descriptive discovery only.
-- Tool State: `/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay`.
+- Authoritative persistent Tool State and deployment/recovery evidence locus: `/Users/brettmacpro/AI/State/Tools/Dropbox Governed Execution Relay`.
 
 ## Applicable stronger classes for Generation 3
 
@@ -36,7 +36,7 @@ Governed Python assurance uses authoritative PyRunway. Ambient/system Python may
 
 Material Mac activation is governed deployment work. Use the current bound Governed Offline Deployer/GTG path when available; do not replace it with ad-hoc shell installation. Quiesce the existing LaunchAgent, prove exact predecessor/runtime identity, deploy atomically, verify, then reactivate. Preserve rollback to the exact predecessor runtime until post-activation verification passes.
 
-Generation 3 binds that lifecycle through `deployment/dger_god_adapter.py` and the data-only `deployment/god_profile.template.json`. The adapter SHA-256 is substituted mechanically into exactly one template placeholder when the exact reviewed adapter bytes are materialized into DGER Tool State; the rendered profile is then hash-pinned for GOD invocation. The adapter uses the launchd service identity as lifecycle-control authority, never PID-only signaling, and restores predecessor non-secret binding/plist state on GOD rollback quiescence.
+Generation 3 binds that lifecycle through `deployment/dger_god_adapter.py` and the data-only `deployment/god_profile.template.json`. The adapter SHA-256 is substituted mechanically into exactly one template placeholder when the exact reviewed adapter bytes are materialized into DGER Tool State; the rendered profile is then hash-pinned for GOD invocation. The adapter uses the launchd service identity as lifecycle-control authority, never PID-only signaling, and preserves write-ahead rollback necessity before candidate configuration mutation so predecessor delivered identity, runtime binding, GTG token state, and LaunchAgent plist are restored through rollback quiescence after interrupted deployment.
 
 ## SG11 semantic-access classification
 
