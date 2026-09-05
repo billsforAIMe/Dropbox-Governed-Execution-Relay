@@ -21,7 +21,6 @@
     "stop_required_ids": ["launchd:com.brettmacpro.chatgpt.dropbox-governed-execution-relay"],
     "leave_stopped_ids": []
   },
-  "derived_surfaces": [],
   "surface": [
     {"runtime_path":"runtime/current/GOVERNED_RELEASE.json","source_path":"GOVERNED_RELEASE.json","mode":"0644"},
     {"runtime_path":"runtime/current/launchagent/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist","source_path":"launchagent/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist","mode":"0644"},
