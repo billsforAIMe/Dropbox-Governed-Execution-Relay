@@ -26,6 +26,7 @@ RUNTIME_ROOT = STATE / "runtime/current"
 LIVE_PLIST = HOME / "Library/LaunchAgents" / f"{LABEL}.plist"
 CANDIDATE_PLIST = RUNTIME_ROOT / "launchagent" / f"{LABEL}.plist"
 CANDIDATE_LAUNCHER = RUNTIME_ROOT / "launcher/dropbox-governed-execution-relay"
+CANDIDATE_SCRIPT = RUNTIME_ROOT / "scripts/dger.py"
 OLD_LAUNCHER = Path("/usr/local/bin/dropbox-governed-execution-relay")
 DELIVERED_IDENTITY = STATE / "delivered-identity.json"
 RUNTIME_BINDING = STATE / "runtime-binding.json"
@@ -43,6 +44,7 @@ REQUIRED_DISCOVERY_SCOPES = [
     "processes", "writers",
 ]
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
+_LAUNCHD_ABSENT_MARKER = "could not find service"
 
 
 def _safe_env() -> dict[str, str]:
@@ -99,6 +101,12 @@ def _require_safe_parent_chain(path: Path) -> None:
         current = current.parent
 
 
+def _require_plain_executable(path: Path) -> None:
+    _require_safe_parent_chain(path)
+    if not _plain_file(path) or not os.access(path, os.X_OK):
+        raise RuntimeError(f"unsafe or unavailable executable: {path}")
+
+
 def _atomic(path: Path, data: bytes, mode: int) -> None:
     _require_safe_parent_chain(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -110,7 +118,13 @@ def _atomic(path: Path, data: bytes, mode: int) -> None:
         raise RuntimeError(f"temporary collision: {tmp}")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
     try:
-        os.write(fd, data)
+        view = memoryview(data)
+        offset = 0
+        while offset < len(view):
+            written = os.write(fd, view[offset:])
+            if written <= 0:
+                raise OSError("short atomic write")
+            offset += written
         os.fsync(fd)
     finally:
         os.close(fd)
@@ -195,67 +209,163 @@ def _load_adapter_state(path: Path, run_id: str) -> dict:
     return value
 
 
-def _plist_identity(path: Path) -> tuple[bool, list[str]]:
+def _plist_mode(path: Path) -> tuple[str, list[str]]:
     if not path.exists() and not path.is_symlink():
-        return False, []
+        return "missing", []
+    try:
+        _require_safe_parent_chain(path)
+    except Exception as exc:
+        return "invalid", [f"unsafe launchd plist path: {exc}"]
     if not _plain_file(path):
-        return False, [f"unsafe launchd plist: {path}"]
+        return "invalid", [f"unsafe launchd plist: {path}"]
     try:
         value = plistlib.loads(path.read_bytes())
     except Exception:
-        return False, [f"unparseable launchd plist: {path}"]
+        return "invalid", [f"unparseable launchd plist: {path}"]
     if not isinstance(value, dict) or value.get("Label") != LABEL:
-        return False, [f"unexpected launchd label: {path}"]
+        return "invalid", [f"unexpected launchd label: {path}"]
     argv = value.get("ProgramArguments")
-    if argv not in ([str(CANDIDATE_LAUNCHER)], [str(OLD_LAUNCHER)]):
-        return False, [f"unexpected DGER launchd argv: {path}"]
-    return True, []
+    if argv == [str(CANDIDATE_LAUNCHER)]:
+        return "candidate", []
+    if argv == [str(OLD_LAUNCHER)]:
+        return "legacy", []
+    return "invalid", [f"unexpected DGER launchd argv: {path}"]
 
 
-def _launchd_loaded(domain: str) -> tuple[bool, str]:
+def _launchd_observe(domain: str) -> dict[str, object]:
     cp = _run(["/bin/launchctl", "print", f"{domain}/{LABEL}"])
     if cp.returncode == 0:
-        return True, cp.stdout
-    return False, cp.stderr
+        match = re.search(r"(?m)^\s*pid\s*=\s*(\d+)\s*$", cp.stdout)
+        return {
+            "loaded": True,
+            "pid": int(match.group(1)) if match else None,
+            "error": None,
+        }
+    diagnostic = (cp.stderr + "\n" + cp.stdout).strip()
+    if _LAUNCHD_ABSENT_MARKER in diagnostic.lower():
+        return {"loaded": False, "pid": None, "error": None}
+    return {
+        "loaded": False,
+        "pid": None,
+        "error": f"launchd observation failed for {domain}: rc={cp.returncode}",
+    }
 
 
-def _process_rows() -> tuple[list[tuple[int, int, str]], list[str]]:
+def _ps_row(pid: int) -> tuple[tuple[int, int, str] | None, str | None]:
+    cp = _run(["/bin/ps", "-p", str(pid), "-o", "pid=,uid=,command="], timeout=10)
+    if cp.returncode != 0:
+        return None, f"process observation failed pid={pid}"
+    line = cp.stdout.strip()
+    if not line:
+        return None, f"launchd-owned process missing pid={pid}"
+    parts = line.split(None, 2)
+    if len(parts) != 3:
+        return None, f"process row malformed pid={pid}"
+    try:
+        observed_pid = int(parts[0])
+        uid = int(parts[1])
+    except ValueError:
+        return None, f"process row invalid pid={pid}"
+    if observed_pid != pid:
+        return None, f"process pid mismatch expected={pid} observed={observed_pid}"
+    return (observed_pid, uid, parts[2]), None
+
+
+def _scan_dger_like_processes() -> tuple[list[tuple[int, int, str]], list[str]]:
     cp = _run(["/bin/ps", "-axo", "pid=,uid=,command="], timeout=20)
     if cp.returncode != 0:
         return [], ["process inventory unavailable"]
     rows: list[tuple[int, int, str]] = []
     errors: list[str] = []
-    markers = ("dropbox-governed-execution-relay", str(STATE / "runtime/"))
-    accepted_script = re.compile(re.escape(str(STATE / "runtime/")) + r"(?:current|[0-9a-f]{40})/scripts/dger\.py(?:\s|$)")
+    markers = (
+        "dropbox-governed-execution-relay",
+        str(STATE / "runtime/"),
+        str(OLD_LAUNCHER),
+    )
     for line in cp.stdout.splitlines():
         parts = line.strip().split(None, 2)
         if len(parts) != 3:
             continue
         try:
-            pid = int(parts[0]); uid = int(parts[1])
+            pid = int(parts[0])
+            uid = int(parts[1])
         except ValueError:
             continue
         command = parts[2]
-        if not any(marker in command for marker in markers):
-            continue
-        accepted = accepted_script.search(command) is not None or command == str(OLD_LAUNCHER) or str(CANDIDATE_LAUNCHER) in command
-        if uid != UID or not accepted:
-            errors.append(f"ambiguous DGER-like process pid={pid}")
-            continue
-        rows.append((pid, uid, command))
+        if any(marker in command for marker in markers):
+            rows.append((pid, uid, command))
     return rows, errors
 
 
-def _observe_cwd(pids: list[int]) -> list[str]:
-    errors: list[str] = []
+def _observe_cwd(pid: int) -> list[str]:
     lsof = Path("/usr/sbin/lsof")
     if not _plain_file(lsof) or not os.access(lsof, os.X_OK):
-        return ["lsof unavailable for ownership-cwd discovery"] if pids else []
-    for pid in pids:
-        cp = _run([str(lsof), "-a", "-p", str(pid), "-d", "cwd", "-Fn"], timeout=10)
-        if cp.returncode != 0 or not any(line.startswith("n/") for line in cp.stdout.splitlines()):
-            errors.append(f"cwd observation unavailable pid={pid}")
-    return errors
+        return ["lsof unavailable for ownership-cwd discovery"]
+    cp = _run([str(lsof), "-a", "-p", str(pid), "-d", "cwd", "-Fn"], timeout=10)
+    if cp.returncode != 0 or not any(line.startswith("n/") for line in cp.stdout.splitlines()):
+        return [f"cwd observation unavailable pid={pid}"]
+    return []
+
+
+def _observe_executable(pid: int) -> list[str]:
+    lsof = Path("/usr/sbin/lsof")
+    if not _plain_file(lsof) or not os.access(lsof, os.X_OK):
+        return ["lsof unavailable for ownership-executable discovery"]
+    cp = _run([str(lsof), "-a", "-p", str(pid), "-d", "txt", "-Fn"], timeout=10)
+    if cp.returncode != 0:
+        return [f"executable observation unavailable pid={pid}"]
+    candidates = [Path(line[1:]) for line in cp.stdout.splitlines() if line.startswith("n/")]
+    if not candidates:
+        return [f"executable observation empty pid={pid}"]
+    for candidate in candidates:
+        try:
+            _require_safe_parent_chain(candidate)
+        except Exception:
+            continue
+        if _plain_file(candidate):
+            return []
+    return [f"no safe executable text path observed pid={pid}"]
+
+
+def _validate_launcher_ownership(plist_mode: str) -> list[str]:
+    if plist_mode == "candidate":
+        launcher = CANDIDATE_LAUNCHER
+    elif plist_mode == "legacy":
+        launcher = OLD_LAUNCHER
+    elif plist_mode == "missing":
+        return []
+    else:
+        return ["invalid DGER plist ownership mode"]
+    try:
+        _require_plain_executable(launcher)
+    except Exception as exc:
+        return [f"launchd executable ownership invalid: {exc}"]
+    return []
+
+
+def _validate_candidate_process_argv(command: str) -> list[str]:
+    required = (
+        str(CANDIDATE_SCRIPT),
+        "--transport-root",
+        "--state-root",
+        str(STATE),
+        "--moh-home",
+        str(MOH_HOME),
+        "--gtg-endpoint",
+        GTG_ENDPOINT,
+        "--gtg-token-file",
+        str(TOKEN_FILE),
+    )
+    missing = [item for item in required if item not in command]
+    if missing:
+        return ["candidate DGER argv observation incomplete"]
+    try:
+        _require_safe_parent_chain(CANDIDATE_SCRIPT)
+    except Exception as exc:
+        return [f"candidate DGER script path unsafe: {exc}"]
+    if not _plain_file(CANDIDATE_SCRIPT):
+        return ["candidate DGER script unavailable"]
+    return []
 
 
 def project_discover(context: dict) -> dict:
@@ -263,21 +373,44 @@ def project_discover(context: dict) -> dict:
     ambiguities: list[str] = []
     if os.geteuid() != UID or Path.home() != HOME:
         errors.append("DGER adapter must run as brettmacpro uid 501")
-    plist_owned, plist_errors = _plist_identity(LIVE_PLIST)
+
+    plist_mode, plist_errors = _plist_mode(LIVE_PLIST)
     ambiguities.extend(plist_errors)
-    gui_loaded, _ = _launchd_loaded(f"gui/{UID}")
-    system_loaded, _ = _launchd_loaded("system")
-    user_loaded, _ = _launchd_loaded(f"user/{UID}")
-    if system_loaded or user_loaded:
+    ambiguities.extend(_validate_launcher_ownership(plist_mode))
+
+    gui = _launchd_observe(f"gui/{UID}")
+    system = _launchd_observe("system")
+    user = _launchd_observe(f"user/{UID}")
+    for observed in (gui, system, user):
+        if observed["error"]:
+            errors.append(str(observed["error"]))
+    if bool(system["loaded"]) or bool(user["loaded"]):
         ambiguities.append("DGER launchd label present outside governed gui domain")
-    rows, process_errors = _process_rows()
-    ambiguities.extend(process_errors)
-    pids = [pid for pid, _uid, _cmd in rows]
-    ambiguities.extend(_observe_cwd(pids))
-    if rows and not gui_loaded:
-        ambiguities.append("DGER process exists without governed launchd service")
-    discovered = [RUNTIME_ID] if (plist_owned or gui_loaded or rows) else []
-    active = [RUNTIME_ID] if (gui_loaded or rows) else []
+
+    rows, scan_errors = _scan_dger_like_processes()
+    errors.extend(scan_errors)
+    owned_pid = gui["pid"] if isinstance(gui["pid"], int) else None
+    if bool(gui["loaded"]) and owned_pid is not None:
+        owned_row, row_error = _ps_row(owned_pid)
+        if row_error:
+            errors.append(row_error)
+        elif owned_row is not None:
+            if owned_row[1] != UID:
+                ambiguities.append(f"launchd-owned DGER pid has unexpected uid pid={owned_pid}")
+            ambiguities.extend(_observe_cwd(owned_pid))
+            ambiguities.extend(_observe_executable(owned_pid))
+            if plist_mode == "candidate":
+                ambiguities.extend(_validate_candidate_process_argv(owned_row[2]))
+    elif rows:
+        ambiguities.append("DGER-like process exists without launchd-owned pid")
+
+    row_pids = {pid for pid, _uid, _command in rows}
+    extra_pids = sorted(pid for pid in row_pids if pid != owned_pid)
+    if extra_pids:
+        ambiguities.append("unowned DGER-like process(es): " + ",".join(map(str, extra_pids)))
+
+    discovered = [RUNTIME_ID] if (plist_mode != "missing" or bool(gui["loaded"]) or rows) else []
+    active = [RUNTIME_ID] if (bool(gui["loaded"]) or rows) else []
     return {
         "discovery_complete": not errors and not ambiguities,
         "discovery_scopes": list(REQUIRED_DISCOVERY_SCOPES),
@@ -291,18 +424,22 @@ def project_discover(context: dict) -> dict:
 
 
 def _stop_service() -> None:
-    loaded, _ = _launchd_loaded(f"gui/{UID}")
-    if loaded:
+    observed = _launchd_observe(f"gui/{UID}")
+    if observed["error"]:
+        raise RuntimeError(str(observed["error"]))
+    if observed["loaded"]:
         cp = _run(["/bin/launchctl", "bootout", f"gui/{UID}/{LABEL}"], timeout=30)
         if cp.returncode != 0:
             raise RuntimeError("launchd bootout failed")
     deadline = time.time() + 15
     while time.time() < deadline:
-        loaded, _ = _launchd_loaded(f"gui/{UID}")
-        rows, row_errors = _process_rows()
+        observed = _launchd_observe(f"gui/{UID}")
+        if observed["error"]:
+            raise RuntimeError(str(observed["error"]))
+        rows, row_errors = _scan_dger_like_processes()
         if row_errors:
-            raise RuntimeError("ambiguous DGER process during quiesce")
-        if not loaded and not rows:
+            raise RuntimeError("DGER process inventory unavailable during quiesce")
+        if not observed["loaded"] and not rows:
             return
         time.sleep(0.2)
     raise RuntimeError("DGER launchd service did not quiesce")
@@ -394,7 +531,12 @@ def _gtg_ping() -> bool:
         body = json.dumps({"jsonrpc": "2.0", "id": "dger-god-smoke", "method": "ping", "params": {}}).encode("utf-8")
         conn = http.client.HTTPConnection(GTG_HOST, GTG_PORT, timeout=5)
         try:
-            conn.request("POST", "/mcp", body=body, headers={"Authorization": "Bearer " + token, "Content-Type": "application/json", "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": "ping"})
+            conn.request("POST", "/mcp", body=body, headers={
+                "Authorization": "Bearer " + token,
+                "Content-Type": "application/json",
+                "MCP-Protocol-Version": "2026-07-28",
+                "Mcp-Method": "ping",
+            })
             response = conn.getresponse()
             raw = response.read(65536)
         finally:
@@ -516,8 +658,8 @@ def main(argv: list[str]) -> int:
                 while time.time() < deadline:
                     discovered = project_discover(context)
                     if discovered["active_runtime_ids"] == [RUNTIME_ID] and not discovered["ambiguities"] and not discovered["errors"]:
-                        rows, row_errors = _process_rows()
-                        if rows and not row_errors:
+                        observed = _launchd_observe(f"gui/{UID}")
+                        if observed["loaded"] and isinstance(observed["pid"], int):
                             break
                     time.sleep(0.25)
                 else:
@@ -526,8 +668,16 @@ def main(argv: list[str]) -> int:
         if verb == "runtime-smoke":
             expected = _string_list(context.get("expected_restart_ids"), "expected_restart_ids")
             observed = project_discover(context)
-            process_rows, process_errors = _process_rows()
-            healthy = not process_errors and _candidate_config_ok(context) and _gtg_ping() and _plain_dir(MOH_HOME) and (bool(process_rows) if expected else not observed["active_runtime_ids"])
+            launchd = _launchd_observe(f"gui/{UID}")
+            healthy_runtime = isinstance(launchd["pid"], int) if expected else not observed["active_runtime_ids"]
+            healthy = (
+                not observed["ambiguities"]
+                and not observed["errors"]
+                and _candidate_config_ok(context)
+                and _gtg_ping()
+                and _plain_dir(MOH_HOME)
+                and healthy_runtime
+            )
             return emit(verb, "PASS", _report(context, prior, healthy=healthy))
         if verb == "unquiesce":
             return emit(verb, "PASS", {"nonce": context["nonce"]})
