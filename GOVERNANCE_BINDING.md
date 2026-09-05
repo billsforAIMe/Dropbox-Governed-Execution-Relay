@@ -16,7 +16,7 @@ Persistent Software Governance authority/channel binding:
 - accepted manifest schema major: `1`
 - resolution policy: `act_time_current_release`
 - release identity policy: `immutable_for_the_exact_governed_act_once_resolved`
-- authoritative State/evidence locus for preserved act-time identities where later assurance needs them: `/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay`
+- authoritative State/evidence locus for preserved act-time identities where later assurance needs them: `/Users/brettmacpro/AI/State/Tools/Dropbox Governed Execution Relay`
 
 For each governed act, resolve the current Software Governance release identity from this persistent GitHub authority/channel binding and verify the exact governed-release manifest and withdrawal status. If the exact release identity changes, inspect the changed authoritative governance material required for the act. Once resolved, use that immutable SG identity for that act.
 
