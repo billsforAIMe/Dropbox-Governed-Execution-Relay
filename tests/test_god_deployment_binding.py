@@ -187,25 +187,43 @@ class BindingTests(unittest.TestCase):
         self.assertNotIn("token", json.dumps(snapshot).lower())
         self.assertNotIn("T" * 32, json.dumps(snapshot))
 
-    def test_rollback_restores_predecessor_config_and_plist(self):
+    def test_rollback_restores_predecessor_config_plist_and_token(self):
         old_identity = b'{"candidate_sha":"' + (b"c" * 40) + b'"}\n'
         old_binding = b'{"old":true}\n'
+        old_token = b"old-token-material\n"
         old_plist = plistlib.dumps({"Label": adapter.LABEL, "ProgramArguments": [str(adapter.OLD_LAUNCHER)]})
         adapter._atomic(adapter.DELIVERED_IDENTITY, old_identity, 0o600)
         adapter._atomic(adapter.RUNTIME_BINDING, old_binding, 0o600)
+        adapter._atomic(adapter.TOKEN_FILE, old_token, 0o600)
         adapter._atomic(adapter.LIVE_PLIST, old_plist, 0o644)
         state = {"snapshots": {
             "delivered_identity": adapter._snapshot(adapter.DELIVERED_IDENTITY),
             "runtime_binding": adapter._snapshot(adapter.RUNTIME_BINDING),
             "live_plist": adapter._snapshot(adapter.LIVE_PLIST),
+            "gtg_token_file": adapter._snapshot(adapter.TOKEN_FILE),
         }}
         adapter._atomic(adapter.DELIVERED_IDENTITY, b'{"new":1}\n', 0o600)
         adapter._atomic(adapter.RUNTIME_BINDING, b'{"new":2}\n', 0o600)
+        adapter._atomic(adapter.TOKEN_FILE, b"new-token-material\n", 0o600)
         adapter._atomic(adapter.LIVE_PLIST, adapter.CANDIDATE_PLIST.read_bytes(), 0o644)
         adapter._restore_predecessor(state)
         self.assertEqual(adapter.DELIVERED_IDENTITY.read_bytes(), old_identity)
         self.assertEqual(adapter.RUNTIME_BINDING.read_bytes(), old_binding)
+        self.assertEqual(adapter.TOKEN_FILE.read_bytes(), old_token)
+        self.assertEqual(adapter.TOKEN_FILE.stat().st_mode & 0o777, 0o600)
         self.assertEqual(adapter.LIVE_PLIST.read_bytes(), old_plist)
+
+    def test_rollback_restores_predecessor_token_absence(self):
+        state = {"snapshots": {
+            "delivered_identity": adapter._snapshot(adapter.DELIVERED_IDENTITY),
+            "runtime_binding": adapter._snapshot(adapter.RUNTIME_BINDING),
+            "live_plist": adapter._snapshot(adapter.LIVE_PLIST),
+            "gtg_token_file": adapter._snapshot(adapter.TOKEN_FILE),
+        }}
+        adapter._atomic(adapter.TOKEN_FILE, b"candidate-token-material\n", 0o600)
+        adapter._restore_predecessor(state)
+        self.assertFalse(adapter.TOKEN_FILE.exists())
+        self.assertFalse(adapter.TOKEN_FILE.is_symlink())
 
     def test_atomic_write_handles_partial_write(self):
         raw = ADAPTER_PATH.read_text(encoding="utf-8")
