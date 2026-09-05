@@ -5,7 +5,7 @@ PATH=/usr/bin:/bin
 export PATH
 unset PYTHONPATH PYTHONHOME VIRTUAL_ENV CONDA_PREFIX BASH_ENV ENV 2>/dev/null || true
 
-STATE="$HOME/ChatGPT/State/Tools/Dropbox Governed Execution Relay"
+STATE="$HOME/AI/State/Tools/Dropbox Governed Execution Relay"
 IDENTITY="$STATE/delivered-identity.json"
 BINDING="$STATE/runtime-binding.json"
 PYRUNWAY="/usr/local/bin/pyrunway"
