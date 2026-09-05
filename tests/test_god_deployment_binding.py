@@ -23,7 +23,7 @@ spec.loader.exec_module(adapter)
 class BindingTests(unittest.TestCase):
     def setUp(self):
         self.td = tempfile.TemporaryDirectory()
-        root = Path(self.td.name)
+        root = Path(self.td.name).resolve()
         home = root / "Users/brettmacpro"
         state = home / "ChatGPT/State/Tools/Dropbox Governed Execution Relay"
         runtime = state / "runtime/current"
