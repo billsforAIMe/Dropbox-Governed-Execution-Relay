@@ -616,7 +616,9 @@ def main(argv: list[str]) -> int:
                     "schema_version": 1,
                     "run_id": run_id,
                     "prior_active_runtime_ids": prior,
+                    "candidate_config_may_have_changed": False,
                     "restart_applied": False,
+                    "rollback_config_restored": False,
                     "snapshots": {
                         "delivered_identity": _snapshot(DELIVERED_IDENTITY),
                         "runtime_binding": _snapshot(RUNTIME_BINDING),
@@ -630,10 +632,12 @@ def main(argv: list[str]) -> int:
                 prior = _string_list(state.get("prior_active_runtime_ids"), "prior_active_runtime_ids")
             _stop_service()
             state = _load_adapter_state(state_path, run_id)
-            if state.get("restart_applied") is True:
+            rollback_required = state.get("candidate_config_may_have_changed") is True or state.get("restart_applied") is True
+            if rollback_required:
                 _restore_predecessor(state)
                 state["restart_applied"] = False
                 state["rollback_config_restored"] = True
+                state["candidate_config_may_have_changed"] = False
                 _write_adapter_state(state_path, state)
             return emit(verb, "PASS", _report(context, prior))
 
@@ -649,10 +653,17 @@ def main(argv: list[str]) -> int:
             expected = _string_list(context.get("expected_restart_ids"), "expected_restart_ids")
             if expected not in ([], [RUNTIME_ID]):
                 raise ValueError("unexpected restart set")
+            state["candidate_config_may_have_changed"] = True
+            state["rollback_config_restored"] = False
+            _write_adapter_state(state_path, state)
             try:
                 _install_candidate_config(context)
             except Exception:
                 _restore_predecessor(state)
+                state["restart_applied"] = False
+                state["rollback_config_restored"] = True
+                state["candidate_config_may_have_changed"] = False
+                _write_adapter_state(state_path, state)
                 raise
             state["restart_applied"] = True
             _write_adapter_state(state_path, state)
