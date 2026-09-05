@@ -83,7 +83,13 @@ if [ -f "$BINDING" ] && [ ! -L "$BINDING" ]; then
   done
   TOKEN_FILE="$(/usr/bin/plutil -extract gtg_token_file raw -o - "$BINDING" 2>/dev/null || true)"
   if [ -n "$TOKEN_FILE" ]; then
-    emit_file gtg_token_file "$TOKEN_FILE"
+    printf 'gtg_token_file_path=%s\n' "$TOKEN_FILE"
+    if [ -f "$TOKEN_FILE" ] && [ ! -L "$TOKEN_FILE" ]; then
+      printf 'gtg_token_file_status=PRESENT\n'
+      printf 'gtg_token_file_mode=%s\n' "$(/usr/bin/stat -f '%Sp' "$TOKEN_FILE" 2>/dev/null || printf UNKNOWN)"
+    else
+      printf 'gtg_token_file_status=ABSENT_OR_UNSAFE\n'
+    fi
   fi
 fi
 
