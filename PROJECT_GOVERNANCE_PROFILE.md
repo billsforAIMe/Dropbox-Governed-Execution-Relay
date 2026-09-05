@@ -16,10 +16,11 @@ Generation 3 materially changes future automated execution/recovery behavior, tr
 - MOH is the only host-execution truth source.
 - DGER transports immutable MOH stages and reconciles execute/status; it never chooses arbitrary host commands.
 - CHM is handoff/result/history truth and never decides whether the Mac process ran.
-- GTG/GTC is the semantic provider/currentness route; exact provider identities are frozen per accepted execution.
+- GTG/GTC is the semantic provider/currentness route. MOH/CHM Doctor identities are acceptance-time observations, while each successful semantic invocation must carry exact GTG invocation-time Tool identity attestation and consistent invocation evidence.
+- The consumer Tool remains exact to the immutable MOH envelope commit/tree/repository/selector accepted by DGER.
 - Dropbox is transport only.
 - New work fails closed unless required MOH/CHM/consumer semantic capabilities are current and callable.
-- Accepted work never re-resolves a newer provider during recovery.
+- During recovery, DGER preserves immutable execution intent and never blind-repeats MOH execution. A later current-compatible MOH or CHM release may service a semantic call through GTG; DGER records that invocation's exact attested provider identity rather than relabeling it as the earlier Doctor observation.
 - A CHM outage after MOH terminal truth can cause only CHM-publication retry, never host re-execution.
 - MOH `IN_DOUBT` remains unresolved and does not close CHM as success.
 
