@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "project_id": "dropbox-governed-execution-relay",
+  "repository_id": "dropbox-governed-execution-relay",
+  "deployment_root": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay",
+  "state_root": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay",
+  "backup_root": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay/DEPLOYMENT/backups",
+  "evidence_root": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay/DEPLOYMENT/evidence",
+  "adapter": {
+    "executable": "/Users/brettmacpro/ChatGPT/State/Tools/Dropbox Governed Execution Relay/deployment-control/dger_god_adapter.py",
+    "sha256": "__ADAPTER_SHA256__"
+  },
+  "limits": {
+    "max_files": 64,
+    "max_file_bytes": 1048576,
+    "max_total_bytes": 8388608
+  },
+  "runtime_accounting": {
+    "runtime_ids": ["launchd:com.brettmacpro.chatgpt.dropbox-governed-execution-relay"],
+    "writer_ids": [],
+    "stop_required_ids": ["launchd:com.brettmacpro.chatgpt.dropbox-governed-execution-relay"],
+    "leave_stopped_ids": []
+  },
+  "derived_surfaces": [],
+  "surface": [
+    {"runtime_path":"runtime/current/GOVERNED_RELEASE.json","source_path":"GOVERNED_RELEASE.json","mode":"0644"},
+    {"runtime_path":"runtime/current/launchagent/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist","source_path":"launchagent/com.brettmacpro.chatgpt.dropbox-governed-execution-relay.plist","mode":"0644"},
+    {"runtime_path":"runtime/current/launcher/dropbox-governed-execution-relay","source_path":"launcher/dropbox-governed-execution-relay","mode":"0755"},
+    {"runtime_path":"runtime/current/scripts/dger.py","source_path":"scripts/dger.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/__init__.py","source_path":"src/dger/__init__.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/gtg_http.py","source_path":"src/dger/gtg_http.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay.py","source_path":"src/dger/relay.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_accept.py","source_path":"src/dger/relay_accept.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_chm.py","source_path":"src/dger/relay_chm.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_moh.py","source_path":"src/dger/relay_moh.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_moh_invoke.py","source_path":"src/dger/relay_moh_invoke.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_protocol.py","source_path":"src/dger/relay_protocol.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_protocol_base.py","source_path":"src/dger/relay_protocol_base.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_protocol_binding.py","source_path":"src/dger/relay_protocol_binding.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_protocol_fs.py","source_path":"src/dger/relay_protocol_fs.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_protocol_ingress.py","source_path":"src/dger/relay_protocol_ingress.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_protocol_validate.py","source_path":"src/dger/relay_protocol_validate.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_runtime.py","source_path":"src/dger/relay_runtime.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_state.py","source_path":"src/dger/relay_state.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_state_ingress.py","source_path":"src/dger/relay_state_ingress.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_state_result.py","source_path":"src/dger/relay_state_result.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_state_stage.py","source_path":"src/dger/relay_state_stage.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_state_store.py","source_path":"src/dger/relay_state_store.py","mode":"0644"},
+    {"runtime_path":"runtime/current/src/dger/relay_v1.py","source_path":"src/dger/relay_v1.py","mode":"0644"}
+  ]
+}
