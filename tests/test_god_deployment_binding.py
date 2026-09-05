@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import plistlib
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -29,11 +30,16 @@ class BindingTests(unittest.TestCase):
         live = home / "Library/LaunchAgents" / f"{adapter.LABEL}.plist"
         candidate_plist = runtime / "launchagent" / f"{adapter.LABEL}.plist"
         launcher = runtime / "launcher/dropbox-governed-execution-relay"
+        script = runtime / "scripts/dger.py"
         moh = home / "ChatGPT/State/Tools/Mac Operation Host"
-        for directory in (state, candidate_plist.parent, launcher.parent, live.parent, moh):
+        old_launcher = root / "usr/local/bin/dropbox-governed-execution-relay"
+        for directory in (state, candidate_plist.parent, launcher.parent, script.parent, live.parent, moh, old_launcher.parent):
             directory.mkdir(parents=True, exist_ok=True)
         launcher.write_text("#!/bin/zsh\n", encoding="utf-8")
         launcher.chmod(0o755)
+        script.write_text("print('dger')\n", encoding="utf-8")
+        old_launcher.write_text("#!/bin/zsh\n", encoding="utf-8")
+        old_launcher.chmod(0o755)
         candidate_plist.write_bytes(plistlib.dumps({
             "Label": adapter.LABEL,
             "ProgramArguments": [str(launcher)],
@@ -47,6 +53,8 @@ class BindingTests(unittest.TestCase):
             "LIVE_PLIST": live,
             "CANDIDATE_PLIST": candidate_plist,
             "CANDIDATE_LAUNCHER": launcher,
+            "CANDIDATE_SCRIPT": script,
+            "OLD_LAUNCHER": old_launcher,
             "DELIVERED_IDENTITY": state / "delivered-identity.json",
             "RUNTIME_BINDING": state / "runtime-binding.json",
             "TOKEN_FILE": state / "credentials/gtg-tools.token",
@@ -95,6 +103,71 @@ class BindingTests(unittest.TestCase):
         self.assertIn('GOD_TERMINATION_SAFETY_CONTRACT = "incarnation-bound-or-fail-closed/v1"', raw)
         self.assertIn('["/bin/launchctl", "bootout", f"gui/{UID}/{LABEL}"]', raw)
 
+    def test_launchd_absent_is_not_error(self):
+        cp = subprocess.CompletedProcess([], 113, "", f'Could not find service "{adapter.LABEL}" in domain for user gui: 501\n')
+        with mock.patch.object(adapter, "_run", return_value=cp):
+            observed = adapter._launchd_observe("gui/501")
+        self.assertFalse(observed["loaded"])
+        self.assertIsNone(observed["pid"])
+        self.assertIsNone(observed["error"])
+
+    def test_launchd_unexpected_observation_fails_closed(self):
+        cp = subprocess.CompletedProcess([], 1, "", "Operation not permitted\n")
+        with mock.patch.object(adapter, "_run", return_value=cp):
+            observed = adapter._launchd_observe("gui/501")
+        self.assertFalse(observed["loaded"])
+        self.assertIsNone(observed["pid"])
+        self.assertIn("launchd observation failed", observed["error"])
+
+    def test_discovery_binds_running_process_to_launchd_owned_pid(self):
+        adapter.LIVE_PLIST.write_bytes(adapter.CANDIDATE_PLIST.read_bytes())
+        gui = {"loaded": True, "pid": 123, "error": None}
+        absent = {"loaded": False, "pid": None, "error": None}
+        command = (
+            f"/safe/python {adapter.CANDIDATE_SCRIPT} --transport-root /tmp/t "
+            f"--state-root {adapter.STATE} --moh-home {adapter.MOH_HOME} "
+            f"--gtg-endpoint {adapter.GTG_ENDPOINT} --gtg-token-file {adapter.TOKEN_FILE}"
+        )
+        with (
+            mock.patch.object(adapter, "_launchd_observe", side_effect=[gui, absent, absent]),
+            mock.patch.object(adapter, "_scan_dger_like_processes", return_value=([(123, 501, command)], [])),
+            mock.patch.object(adapter, "_ps_row", return_value=((123, 501, command), None)),
+            mock.patch.object(adapter, "_observe_cwd", return_value=[]),
+            mock.patch.object(adapter, "_observe_executable", return_value=[]),
+            mock.patch.object(adapter, "_validate_launcher_ownership", return_value=[]),
+            mock.patch.object(adapter.Path, "home", return_value=adapter.HOME),
+            mock.patch.object(adapter.os, "geteuid", return_value=501),
+        ):
+            result = adapter.project_discover(self.context())
+        self.assertTrue(result["discovery_complete"])
+        self.assertEqual(result["discovered_runtime_ids"], [adapter.RUNTIME_ID])
+        self.assertEqual(result["active_runtime_ids"], [adapter.RUNTIME_ID])
+        self.assertEqual(result["ambiguities"], [])
+        self.assertEqual(result["errors"], [])
+
+    def test_discovery_rejects_unowned_extra_dger_process(self):
+        adapter.LIVE_PLIST.write_bytes(adapter.CANDIDATE_PLIST.read_bytes())
+        gui = {"loaded": True, "pid": 123, "error": None}
+        absent = {"loaded": False, "pid": None, "error": None}
+        command = (
+            f"/safe/python {adapter.CANDIDATE_SCRIPT} --transport-root /tmp/t "
+            f"--state-root {adapter.STATE} --moh-home {adapter.MOH_HOME} "
+            f"--gtg-endpoint {adapter.GTG_ENDPOINT} --gtg-token-file {adapter.TOKEN_FILE}"
+        )
+        with (
+            mock.patch.object(adapter, "_launchd_observe", side_effect=[gui, absent, absent]),
+            mock.patch.object(adapter, "_scan_dger_like_processes", return_value=([(123, 501, command), (456, 501, command)], [])),
+            mock.patch.object(adapter, "_ps_row", return_value=((123, 501, command), None)),
+            mock.patch.object(adapter, "_observe_cwd", return_value=[]),
+            mock.patch.object(adapter, "_observe_executable", return_value=[]),
+            mock.patch.object(adapter, "_validate_launcher_ownership", return_value=[]),
+            mock.patch.object(adapter.Path, "home", return_value=adapter.HOME),
+            mock.patch.object(adapter.os, "geteuid", return_value=501),
+        ):
+            result = adapter.project_discover(self.context())
+        self.assertFalse(result["discovery_complete"])
+        self.assertTrue(any("unowned DGER-like" in item for item in result["ambiguities"]))
+
     def test_candidate_config_is_exact_and_secret_is_not_evidence(self):
         context = self.context()
         with mock.patch.object(adapter, "_keychain_token", return_value="T" * 48):
@@ -134,12 +207,17 @@ class BindingTests(unittest.TestCase):
         self.assertEqual(adapter.RUNTIME_BINDING.read_bytes(), old_binding)
         self.assertEqual(adapter.LIVE_PLIST.read_bytes(), old_plist)
 
+    def test_atomic_write_handles_partial_write(self):
+        raw = ADAPTER_PATH.read_text(encoding="utf-8")
+        self.assertIn("while offset < len(view):", raw)
+        self.assertIn("offset += written", raw)
+
     def test_profile_template_is_closed_complete_and_single_substitution(self):
         raw = PROFILE_TEMPLATE.read_text(encoding="utf-8")
         self.assertEqual(raw.count("__ADAPTER_SHA256__"), 1)
         adapter_sha = hashlib.sha256(ADAPTER_PATH.read_bytes()).hexdigest()
         rendered = raw.replace("__ADAPTER_SHA256__", adapter_sha)
-        self.assertNotIn("__", rendered)
+        self.assertNotIn("__ADAPTER_SHA256__", rendered)
         profile = json.loads(rendered)
         self.assertEqual(profile["repository_id"], "dropbox-governed-execution-relay")
         self.assertEqual(profile["adapter"]["sha256"], adapter_sha)
