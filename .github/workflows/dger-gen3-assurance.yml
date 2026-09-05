@@ -1,9 +1,9 @@
 name: DGER Gen3 Temporary Assurance
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - builder/dger-gen3-gtg17-attested
   workflow_dispatch:
 
 permissions:
@@ -16,14 +16,14 @@ jobs:
       - name: Check out exact assurance subject
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Bind assurance to exact checked-out commit
         shell: bash
         run: |
           set -euo pipefail
-          EXPECTED="${{ github.event.pull_request.head.sha || github.sha }}"
+          EXPECTED="${{ github.sha }}"
           test -n "$EXPECTED"
           test "$(/usr/bin/git rev-parse HEAD)" = "$EXPECTED"
 
