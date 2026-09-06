@@ -1,0 +1,104 @@
+{
+  "schema": "governed-effect-surface-inventory/v1",
+  "tool_id": "dropbox-governed-execution-relay",
+  "inventory_version": "gen4-source-candidate-1",
+  "effect_family": "asynchronous-mac-execution-relay",
+  "surfaces": [
+    {
+      "id": "prototype-r0-library",
+      "path": "src/dger/relay.py",
+      "symbols": ["Relay", "start_gep", "reconstruct_gep", "provision_gep"],
+      "class": "LEGACY_DIRECT_EXECUTION",
+      "post_gen4_status": "PERMANENTLY_RETIRED",
+      "mechanical_guard": "DGER_PROTOTYPE_R0_RETIRED"
+    },
+    {
+      "id": "gen3-cli",
+      "path": "scripts/dger.py",
+      "symbols": ["main"],
+      "class": "COMPATIBILITY_CLI",
+      "post_gen4_status": "PREACTIVATION_ONLY",
+      "mechanical_guard": "RelayRuntimeMixin.assert_legacy_allowed"
+    },
+    {
+      "id": "gen3-library-relay",
+      "path": "src/dger/relay_v1.py",
+      "symbols": ["Relay.process_one", "Relay.resume_one", "Relay.scan_once", "Relay.run"],
+      "class": "COMPATIBILITY_LIBRARY",
+      "post_gen4_status": "PREACTIVATION_ONLY",
+      "mechanical_guard": "RelayRuntimeMixin.assert_legacy_allowed"
+    },
+    {
+      "id": "gen3-moh-effect",
+      "path": "src/dger/relay_moh_invoke.py",
+      "symbols": ["RelayMohInvokeMixin._invoke_moh"],
+      "class": "LEGACY_MOH_EXECUTION_EFFECT",
+      "post_gen4_status": "PREACTIVATION_ONLY",
+      "mechanical_guard": "RelayRuntimeMixin.assert_legacy_allowed"
+    },
+    {
+      "id": "gen3-recovery",
+      "path": "src/dger/relay_moh.py",
+      "symbols": ["RelayMohMixin._reconcile_moh"],
+      "class": "LEGACY_EXECUTION_RECOVERY",
+      "post_gen4_status": "PREACTIVATION_ONLY",
+      "mechanical_guard": "RelayRuntimeMixin.assert_legacy_allowed"
+    },
+    {
+      "id": "gen3-launcher",
+      "path": "launcher/dropbox-governed-execution-relay",
+      "symbols": ["exec scripts/dger.py"],
+      "class": "INSTALLED_ENTRYPOINT",
+      "post_gen4_status": "PREACTIVATION_ONLY",
+      "mechanical_guard": "Gen3 runtime construction fails closed when Gen4 activation State exists"
+    },
+    {
+      "id": "gen4-library-relay",
+      "path": "src/dger/gen4_driver.py",
+      "symbols": ["Gen4DriverMixin.process_one", "Gen4DriverMixin.resume_one", "Gen4DriverMixin.scan_once"],
+      "class": "GEN4_EFFECT_ORCHESTRATION",
+      "post_gen4_status": "SOURCE_READY_PREACTIVATION",
+      "mechanical_guard": "exact Gen4Peers implementation required"
+    },
+    {
+      "id": "gen4-moh-effect-port",
+      "path": "src/dger/gen4_effect.py",
+      "symbols": ["Gen4Peers.moh_execute", "Gen4EffectMixin._execute_moh"],
+      "class": "GEN4_MOH_EXECUTION_EFFECT",
+      "post_gen4_status": "SOURCE_READY_PREACTIVATION",
+      "mechanical_guard": "PRE_AHC_EXECUTE_WAL + authenticated AHC IN_DOUBT + MOH status proof + MOH execute-call WAL"
+    },
+    {
+      "id": "gen4-ahc-effect-port",
+      "path": "src/dger/gen4_contract.py",
+      "symbols": ["Gen4Peers.ahc_begin", "Gen4Peers.ahc_accept_terminal", "Gen4Peers.ahc_note_in_doubt"],
+      "class": "GEN4_LIFECYCLE_BRIDGE",
+      "post_gen4_status": "SOURCE_READY_PREACTIVATION",
+      "mechanical_guard": "trusted correlation + protected EXECUTION_RELAY service identity"
+    },
+    {
+      "id": "gen4-chm-history-port",
+      "path": "src/dger/gen4_contract.py",
+      "symbols": ["Gen4Peers.chm_publish_terminal"],
+      "class": "GEN4_HISTORY_RESULT_EFFECT",
+      "post_gen4_status": "SOURCE_READY_PREACTIVATION",
+      "mechanical_guard": "AHC terminal acceptance precedes CHM publication"
+    },
+    {
+      "id": "gen4-production-peer-adapter",
+      "path": "src/dger/gen4_contract.py",
+      "symbols": ["UnavailableGen4Peers"],
+      "class": "PRODUCTION_PEER_ADAPTER",
+      "post_gen4_status": "FAIL_CLOSED_PENDING_EXACT_PEER_TUPLE",
+      "mechanical_guard": "GEN4_PEER_CONTRACTS_UNAVAILABLE"
+    },
+    {
+      "id": "deployment-admin",
+      "path": "deployment/dger_god_adapter.py",
+      "symbols": ["deployment lifecycle adapter"],
+      "class": "ADMIN_DEPLOYMENT",
+      "post_gen4_status": "UNCHANGED_GEN3_DEPLOYMENT_MECHANICS",
+      "mechanical_guard": "not a MOH process-start surface; Gen4 activation remains separately blocked"
+    }
+  ]
+}
