@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from .gen4_contract import ServiceIdentity
-from .gen4_primitives import DgerGen4Error
+from .gen4_primitives import DgerGen4Error, canonical_file_bytes, sha256
 
 DELEGATED_SERVICE_CONTEXT_SCHEMA = "governed-delegated-service-context/v1"
 DELEGATED_SERVICE_CONTEXT_ISSUER = "governed-tool-gateway"
@@ -39,6 +39,7 @@ _EXPECTED_FIELDS = {
     "project_binding",
     "context_digest",
 }
+_CONTEXT_BODY_FIELDS = _EXPECTED_FIELDS - {"context_digest"}
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,13 @@ def parse_delegated_service_context(value: Any) -> DelegatedServiceContext:
     context_digest = value.get("context_digest")
     if not isinstance(context_digest, str) or _CONTEXT_DIGEST_RE.fullmatch(context_digest) is None:
         raise DgerGen4Error("DELEGATED_CONTEXT_DIGEST_INVALID")
+    # GTG R4 defines this digest over the exact logical context body using compact,
+    # sorted UTF-8 JSON and one trailing LF. Matching the digest proves only byte/value
+    # integrity of the logical record; it is explicitly not authentication.
+    body = {key: value[key] for key in _CONTEXT_BODY_FIELDS}
+    expected_digest = "sha256:" + sha256(canonical_file_bytes(body))
+    if context_digest != expected_digest:
+        raise DgerGen4Error("DELEGATED_CONTEXT_DIGEST_MISMATCH")
 
     return DelegatedServiceContext(
         schema=DELEGATED_SERVICE_CONTEXT_SCHEMA,
