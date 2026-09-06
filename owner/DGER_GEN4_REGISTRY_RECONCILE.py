@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -19,8 +18,6 @@ GTG_REPO = "billsforAIMe/Governed-Tool-Gateway"
 GTG_COMMIT = "9333e6a94ef434386b28c4e77bff63fad27e4b5d"
 REGISTRY_REPO = "billsforAIMe/Tool-Registry"
 GTG_URL = "http://127.0.0.1:8799/mcp"
-GITSTORAGE_RUNTIME = Path("/Users/brettmacpro/ChatGPT/Installed/Tools/GitStorage/gitstorage")
-GITSTORAGE_SHA256 = "1059071d24ffd90502b80197702ce38a1d14b855dcb42c597c99a073cffbe587"
 
 
 def require(condition: bool, message: str) -> None:
@@ -175,10 +172,6 @@ def main() -> None:
     require(not sys.argv[1:], "UNEXPECTED_ARGUMENTS")
 
     gh = find_executable(["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"])
-    gs = physical_executable(GITSTORAGE_RUNTIME)
-    require(gs is not None, "GITSTORAGE_REGISTERED_RUNTIME_MISSING_OR_UNSAFE")
-    require(hashlib.sha256(Path(gs).read_bytes()).hexdigest() == GITSTORAGE_SHA256,
-            "GITSTORAGE_REGISTERED_RUNTIME_SHA256_MISMATCH")
 
     require(gh_ref(gh, DGER_REPO) == DGER_COMMIT, "DGER_MAIN_NOT_EXACT_DELIVERED_GEN4")
     require(gh_ref(gh, GTG_REPO) == GTG_COMMIT, "GTG_MAIN_MOVED_FROM_INSTALLED_GEN28")
@@ -190,8 +183,6 @@ def main() -> None:
     print("dger_delivery_identity=PASS")
 
     token = tools_bearer_token()
-    env_path = str(GITSTORAGE_RUNTIME.parent) + os.pathsep + os.environ.get("PATH", os.defpath)
-    os.environ["PATH"] = env_path
 
     structured = gtg_call(
         token,
