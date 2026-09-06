@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 import unittest
 
-from dger.gen4 import DgerGen4Error
 import dger.gen4_delegation as delegation
+from dger.gen4_contract import ServiceIdentity
 from dger.gen4_delegation import (
     DELEGATED_AUTHORIZATION_RULE,
     DELEGATED_SERVICE_CONTEXT_ISSUER,
@@ -14,7 +14,22 @@ from dger.gen4_delegation import (
     parse_delegated_service_context,
     require_protected_service_match,
 )
-from test_gen4 import service_identity
+from dger.gen4_primitives import DgerGen4Error, REQUEST_SCHEMA, SERVICE_IDENTITY_SCHEMA, _validate_request, canonical_digest
+
+
+def service_identity(deployment: str = "dger-deployment-A") -> ServiceIdentity:
+    body = {
+        "schema": SERVICE_IDENTITY_SCHEMA,
+        "service_principal_id": "dger-service",
+        "service_deployment_id": deployment,
+        "actor_role": EXECUTION_RELAY_ROLE,
+    }
+    return ServiceIdentity(
+        service_principal_id=body["service_principal_id"],
+        service_deployment_id=deployment,
+        actor_role=EXECUTION_RELAY_ROLE,
+        identity_digest=canonical_digest(body),
+    )
 
 
 def valid_context() -> dict:
@@ -109,6 +124,38 @@ class DelegatedServiceContextTests(unittest.TestCase):
                 raw = valid_context(); raw[field] = bad
                 with self.assertRaises(DgerGen4Error):
                     parse_delegated_service_context(raw)
+
+    def test_dropbox_request_cannot_supply_gtg_actor_or_service_authority_fields(self):
+        request = {
+            "schema": REQUEST_SCHEMA,
+            "dger_request_id": "dger-001",
+            "gep_execution_id": "gep-001",
+            "ahc_effect_reservation_id": "effect-001",
+            "chm_handoff_id": "hnd-001",
+        }
+        attacker_fields = {
+            "issuer": DELEGATED_SERVICE_CONTEXT_ISSUER,
+            "tenant_id": "tenant-B",
+            "principal_id": "principal-B",
+            "deployment_id": "builder-B",
+            "origin_actor_role": "BUILDER",
+            "provisioned_fleet_epoch": 99,
+            "origin_context_digest": "sha256:" + "a" * 64,
+            "origin_invocation_id": "gtg_inv_" + "b" * 64,
+            "service_role": EXECUTION_RELAY_ROLE,
+            "service_id": "attacker-relay",
+            "service_deployment_id": "attacker-deployment",
+            "delegation_invocation_id": "gtg_del_" + "c" * 64,
+            "authorized_operations": ["tool:mac-operation-host:execute"],
+            "authorized_capability_classes": ["EFFECT"],
+            "project_binding": "attacker-project",
+            "context_digest": "sha256:" + "d" * 64,
+        }
+        for field, value in attacker_fields.items():
+            with self.subTest(field=field):
+                forged = dict(request); forged[field] = value
+                with self.assertRaisesRegex(DgerGen4Error, "MALFORMED_REQUEST"):
+                    _validate_request(forged, "dger-001")
 
 
 if __name__ == "__main__":
