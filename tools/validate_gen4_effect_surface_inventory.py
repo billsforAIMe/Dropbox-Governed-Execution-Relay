@@ -70,10 +70,18 @@ def main() -> int:
     ]
     for token in ordering_tokens:
         if token not in gen4: fail(f"GEN4_ORDERING_TOKEN_MISSING:{token}")
+    for token in ('_validate_ack(ack, AHC_TOOL_ID)', '_validate_ack(ack, CHM_TOOL_ID)', '"moh_invocation_evidence"'):
+        if token not in gen4: fail(f"PROVIDER_EVIDENCE_EFFECT_TOKEN_MISSING:{token}")
+
     contract = (ROOT / "src/dger/gen4_contract.py").read_text("utf-8")
     if "GEN4_PEER_CONTRACTS_UNAVAILABLE" not in contract: fail("PRODUCTION_FAIL_CLOSED_MISSING")
     if "chm_publish_terminal" not in contract or "ahc_accept_terminal" not in contract:
         fail("TERMINAL_PORTS_MISSING")
+    for token in (
+        "class InvocationEvidence", "provider_evidence", "tool_identity", "tool_tree", "gtg_identity",
+        "registry_identity", "_validate_invocation_evidence", "TRUSTED_CORRELATION_PROVIDER_SET_INVALID",
+    ):
+        if token not in contract: fail(f"PROVIDER_EVIDENCE_CONTRACT_TOKEN_MISSING:{token}")
 
     # Mechanically enumerate process-start/semantic execute primitives in DGER Python.
     findings: list[str] = []
