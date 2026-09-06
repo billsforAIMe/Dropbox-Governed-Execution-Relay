@@ -2,12 +2,37 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
+import re
 from typing import Any, Protocol
 
 from .gen4_primitives import (
     DgerGen4Error, HEX64_RE, MAX_PEER_OBSERVATION_BYTES, MOH_ALL, SERVICE_IDENTITY_SCHEMA, TRUSTED_CORRELATION_SCHEMA, _json_object_no_duplicates, _safe_id,
     canonical_bytes, canonical_digest, read_protected_regular,
 )
+
+GEP_TOOL_ID = "governed-execution-platform"
+AHC_TOOL_ID = "autonomous-handoff-coordinator"
+MOH_TOOL_ID = "mac-operation-host"
+CHM_TOOL_ID = "common-handoff-manager"
+_HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
+_INVOCATION_ID_RE = re.compile(r"^inv_[0-9a-f]{32}$")
+
+
+@dataclass(frozen=True)
+class InvocationEvidence:
+    """Normalized exact GTG invocation-time provider identity evidence.
+
+    The peer adapter may map only an exact delivered GTG/GTC attestation into this
+    structure. DGER does not infer currentness or compatibility from caller data.
+    """
+    tool_id: str
+    operation: str
+    invocation_id: str
+    tool_identity: str
+    tool_tree: str
+    gtg_identity: str
+    registry_identity: str
+
 
 @dataclass(frozen=True)
 class ServiceIdentity:
@@ -39,6 +64,7 @@ class TrustedCorrelation:
     gep_admission_sha256: str
     chm_handoff_id: str | None
     correlation_digest: str
+    provider_evidence: tuple[InvocationEvidence, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -55,6 +81,7 @@ class AhcObservation:
     gep_execution_id: str
     state: str
     observation_digest: str
+    invocation_evidence: InvocationEvidence | dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -64,20 +91,24 @@ class MohObservation:
     record_id: str | None
     evidence_digest: str
     result: dict[str, Any] | None = None
+    invocation_evidence: InvocationEvidence | dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
 class Ack:
     ok: bool
     digest: str
+    invocation_evidence: InvocationEvidence | dict[str, Any] | None = None
 
 
 class Gen4Peers(Protocol):
     """Internal semantic port. Wire/auth translation belongs to the exact delivered peer adapter.
 
     Implementations MUST invoke peers under the protected DGER service credential/delegated
-    context. No method accepts identity from Dropbox as authority. The production adapter is
-    intentionally unavailable until GTG/GTC #94 and the exact AHC/GEP/CHM/MOH contracts ship.
+    context. No method accepts identity from Dropbox as authority. Every successful semantic
+    peer call MUST return exact invocation-time GTG provider identity evidence. The production
+    adapter is intentionally unavailable until GTG/GTC #94 and the exact AHC/GEP/CHM/MOH
+    contracts ship; it must enforce delivered peer currentness/compatibility before returning.
     """
 
     def establish_correlation(
@@ -112,6 +143,41 @@ class UnavailableGen4Peers:
     chm_publish_terminal = _no
 
 
+def _invocation_evidence_from_any(value: InvocationEvidence | dict[str, Any] | None) -> InvocationEvidence:
+    if isinstance(value, InvocationEvidence):
+        return value
+    if not isinstance(value, dict):
+        raise DgerGen4Error("GTG_INVOCATION_EVIDENCE_REQUIRED")
+    expected = {"tool_id", "operation", "invocation_id", "tool_identity", "tool_tree", "gtg_identity", "registry_identity"}
+    if set(value) != expected:
+        raise DgerGen4Error("GTG_INVOCATION_EVIDENCE_INVALID")
+    return InvocationEvidence(**{key: str(value[key]) for key in expected})
+
+
+def _validate_invocation_evidence(
+    value: InvocationEvidence | dict[str, Any] | None,
+    *,
+    expected_tool: str | None = None,
+) -> InvocationEvidence:
+    evidence = _invocation_evidence_from_any(value)
+    _safe_id(evidence.tool_id, "GTG_INVOCATION_TOOL_INVALID")
+    _safe_id(evidence.operation, "GTG_INVOCATION_OPERATION_INVALID")
+    if expected_tool is not None and evidence.tool_id != expected_tool:
+        raise DgerGen4Error("GTG_INVOCATION_TOOL_MISMATCH")
+    if _INVOCATION_ID_RE.fullmatch(evidence.invocation_id) is None:
+        raise DgerGen4Error("GTG_INVOCATION_ID_INVALID")
+    for key in ("tool_identity", "tool_tree", "gtg_identity", "registry_identity"):
+        if _HEX40_RE.fullmatch(getattr(evidence, key)) is None:
+            raise DgerGen4Error("GTG_INVOCATION_IDENTITY_INVALID", key)
+    return evidence
+
+
+def _validate_ack(ack: Ack, expected_tool: str) -> InvocationEvidence:
+    if not ack.ok or HEX64_RE.fullmatch(ack.digest) is None:
+        raise DgerGen4Error("PEER_ACK_INVALID", expected_tool)
+    return _validate_invocation_evidence(ack.invocation_evidence, expected_tool=expected_tool)
+
+
 def load_service_identity(path: Path) -> ServiceIdentity:
     value = _json_object_no_duplicates(read_protected_regular(path, 16_384))
     expected = {"schema", "service_principal_id", "service_deployment_id", "actor_role", "identity_digest"}
@@ -128,6 +194,10 @@ def load_service_identity(path: Path) -> ServiceIdentity:
     return ServiceIdentity(principal, deployment, "EXECUTION_RELAY", supplied)
 
 
+def _evidence_list(c: TrustedCorrelation) -> list[InvocationEvidence]:
+    return [_validate_invocation_evidence(item) for item in c.provider_evidence]
+
+
 def _correlation_to_dict(c: TrustedCorrelation) -> dict[str, Any]:
     return {
         "schema": TRUSTED_CORRELATION_SCHEMA,
@@ -141,13 +211,25 @@ def _correlation_to_dict(c: TrustedCorrelation) -> dict[str, Any]:
         "gep_admission_sha256": c.gep_admission_sha256,
         "chm_handoff_id": c.chm_handoff_id,
         "correlation_digest": c.correlation_digest,
+        "provider_evidence": [asdict(item) for item in _evidence_list(c)],
     }
 
 
 def _correlation_from_dict(value: dict[str, Any]) -> TrustedCorrelation:
-    if value.get("schema") != TRUSTED_CORRELATION_SCHEMA or not isinstance(value.get("origin"), dict):
+    expected = {
+        "schema", "origin", "service_deployment_id", "ahc_execution_claim_id", "ahc_effect_reservation_id",
+        "ahc_work_revision", "gep_execution_id", "gep_request_digest", "gep_admission_sha256", "chm_handoff_id",
+        "correlation_digest", "provider_evidence",
+    }
+    if set(value) != expected or value.get("schema") != TRUSTED_CORRELATION_SCHEMA or not isinstance(value.get("origin"), dict):
         raise DgerGen4Error("TRUSTED_CORRELATION_STATE_INVALID")
     o = value["origin"]
+    origin_expected = {"tenant_id", "principal_id", "deployment_id", "fleet_epoch", "originating_invocation_id", "context_digest"}
+    if set(o) != origin_expected:
+        raise DgerGen4Error("TRUSTED_ORIGIN_STATE_INVALID")
+    raw_evidence = value.get("provider_evidence")
+    if not isinstance(raw_evidence, list):
+        raise DgerGen4Error("TRUSTED_PROVIDER_EVIDENCE_STATE_INVALID")
     origin = TrustedOrigin(
         tenant_id=str(o["tenant_id"]), principal_id=str(o["principal_id"]), deployment_id=str(o["deployment_id"]),
         fleet_epoch=int(o["fleet_epoch"]), originating_invocation_id=str(o["originating_invocation_id"]), context_digest=str(o["context_digest"]),
@@ -163,6 +245,7 @@ def _correlation_from_dict(value: dict[str, Any]) -> TrustedCorrelation:
         gep_admission_sha256=str(value["gep_admission_sha256"]),
         chm_handoff_id=value.get("chm_handoff_id"),
         correlation_digest=str(value["correlation_digest"]),
+        provider_evidence=tuple(_invocation_evidence_from_any(item) for item in raw_evidence),
     )
 
 
@@ -191,8 +274,17 @@ def _validate_correlation(c: TrustedCorrelation, request: dict[str, Any], admiss
         raise DgerGen4Error("CHM_HANDOFF_CORRELATION_MISMATCH")
     if c.gep_admission_sha256 != admission_sha256:
         raise DgerGen4Error("GEP_ADMISSION_MISMATCH")
-    # The exact peer adapter is responsible for proving payload closure against the
-    # authenticated GEP admission. The normalized correlation digest binds that proof.
+
+    evidence = _evidence_list(c)
+    invocation_ids = [item.invocation_id for item in evidence]
+    if len(invocation_ids) != len(set(invocation_ids)):
+        raise DgerGen4Error("GTG_INVOCATION_EVIDENCE_DUPLICATE")
+    required_tools = {GEP_TOOL_ID, AHC_TOOL_ID}
+    if c.chm_handoff_id is not None:
+        required_tools.add(CHM_TOOL_ID)
+    if {item.tool_id for item in evidence} != required_tools:
+        raise DgerGen4Error("TRUSTED_CORRELATION_PROVIDER_SET_INVALID")
+
     expected_corr = canonical_digest({
         "origin": asdict(c.origin),
         "service_deployment_id": c.service_deployment_id,
@@ -204,6 +296,7 @@ def _validate_correlation(c: TrustedCorrelation, request: dict[str, Any], admiss
         "gep_admission_sha256": c.gep_admission_sha256,
         "payload_manifest_sha256": payload_manifest_sha256,
         "chm_handoff_id": c.chm_handoff_id,
+        "provider_evidence": [asdict(item) for item in evidence],
     })
     if c.correlation_digest != expected_corr:
         raise DgerGen4Error("TRUSTED_CORRELATION_DIGEST_MISMATCH")
@@ -216,6 +309,7 @@ def _validate_ahc(obs: AhcObservation, c: TrustedCorrelation) -> None:
         raise DgerGen4Error("AHC_OBSERVATION_STATE_INVALID")
     if HEX64_RE.fullmatch(obs.observation_digest) is None:
         raise DgerGen4Error("AHC_OBSERVATION_DIGEST_INVALID")
+    _validate_invocation_evidence(obs.invocation_evidence, expected_tool=AHC_TOOL_ID)
 
 
 def _validate_moh(obs: MohObservation, c: TrustedCorrelation) -> None:
@@ -227,6 +321,7 @@ def _validate_moh(obs: MohObservation, c: TrustedCorrelation) -> None:
         _safe_id(obs.record_id, "MOH_RECORD_ID_INVALID")
     if HEX64_RE.fullmatch(obs.evidence_digest) is None:
         raise DgerGen4Error("MOH_EVIDENCE_DIGEST_INVALID")
+    _validate_invocation_evidence(obs.invocation_evidence, expected_tool=MOH_TOOL_ID)
     raw = canonical_bytes(asdict(obs))
     if len(raw) > MAX_PEER_OBSERVATION_BYTES:
         raise DgerGen4Error("MOH_OBSERVATION_TOO_LARGE")
