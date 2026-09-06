@@ -52,6 +52,10 @@ The exact production peer adapter must consume GTG/GTC's delivered delegated-ser
 
 The normalized trusted correlation retained by DGER also binds distinct AHC execution claim, AHC effect reservation, AHC work revision, GEP execution, GEP request digest, exact admission digest, optional CHM handoff correlation, and payload-closure proof. Cross-tenant/principal/deployment/epoch/service replay must be rejected by authenticated peer truth before execution.
 
+Every successful semantic peer call must also carry exact invocation-time GTG provider identity evidence: `tool_id`, operation, GTG `invocation_id`, exact Tool commit, exact Tool tree, exact GTG commit, and exact Registry commit. Correlation establishment must retain the exact GEP and AHC provider evidence and, when CHM correlation is used, the exact CHM provider evidence. AHC and MOH observations plus AHC/CHM acknowledgements likewise retain their own invocation-time provider evidence. DGER never manufactures that evidence from transport or peer payload fields.
+
+The exact delivered peer adapter is responsible for proving GTG/GTC currentness, authorization, and peer release compatibility before returning a successful normalized result. A provider may advance without forcing a new host execution only when that governed adapter accepts the invocation as current-compatible; DGER records the actual invocation-time provider identity. A compatibility/currentness rejection remains a blocked peer call and cannot reopen MOH execution.
+
 Identifiers remain distinct. DGER never aliases GTG invocation/delegation IDs, AHC claim/effect/review/wake IDs, GEP execution ID, CHM handoff ID, DGER request ID, or MOH record identity.
 
 ## Pre-execution ordering
@@ -86,11 +90,11 @@ Transport retry, READY replay, Dropbox duplication/deletion, CHM state, CHM resu
 
 Once exact MOH terminal truth is durable:
 
-1. DGER records the bounded terminal observation/evidence digest in private State;
-2. DGER publishes the exact bounded result record idempotently;
-3. DGER reports the exact terminal external-effect result to AHC idempotently;
+1. DGER records the bounded terminal observation/evidence digest and exact MOH invocation-time provider evidence in private State;
+2. DGER publishes the exact bounded result record idempotently, including the exact MOH invocation-time provider evidence;
+3. DGER reports the exact terminal external-effect result to AHC idempotently and retains the AHC acknowledgement provider evidence;
 4. AHC remains lifecycle authority and may produce the causal Builder wake;
-5. only after AHC terminal acceptance does DGER publish optional CHM history/result correlation.
+5. only after AHC terminal acceptance does DGER publish optional CHM history/result correlation and retain the CHM acknowledgement provider evidence.
 
 AHC unavailability after MOH terminal retries only AHC reporting. CHM unavailability retries only CHM history/result publication. Neither path can return to MOH execution.
 
