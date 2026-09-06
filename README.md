@@ -52,7 +52,7 @@ private ingress freeze
 → optional CHM result/history publication
 ```
 
-A lost AHC-begin response is reconciled through AHC status. Any ambiguous MOH execute response restarts through MOH status, not another blind execute. Only a fresh exact `NOT_FOUND`/`ADMITTED` observation can permit a same-GEP-execution retry. Once MOH reports `IN_DOUBT`, DGER permanently removes execute permission for that execution and retries only AHC in-doubt reporting.
+A lost AHC-begin response is reconciled through AHC status. An ordinary lost/missing MOH execute response restarts through MOH status, not another blind execute; only a fresh exact `NOT_FOUND`/`ADMITTED` observation can then permit a same-GEP-execution retry. By contrast, an execute response that arrives but fails exact correlation, provider-identity, or operation-evidence validation sets the monotonic `INVALID_EXECUTE_RESPONSE` no-repeat latch: later status may prove terminal truth, but even `NOT_FOUND`/`ADMITTED` cannot restore execute permission. Once MOH itself reports `IN_DOUBT`, DGER likewise permanently removes execute permission for that execution and retries only AHC in-doubt reporting.
 
 AHC or CHM unavailability after MOH terminal truth cannot cause re-execution.
 
