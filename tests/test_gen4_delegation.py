@@ -14,7 +14,10 @@ from dger.gen4_delegation import (
     parse_delegated_service_context,
     require_protected_service_match,
 )
-from dger.gen4_primitives import DgerGen4Error, REQUEST_SCHEMA, SERVICE_IDENTITY_SCHEMA, _validate_request, canonical_digest
+from dger.gen4_primitives import (
+    DgerGen4Error, REQUEST_SCHEMA, SERVICE_IDENTITY_SCHEMA, _validate_request,
+    canonical_digest, canonical_file_bytes, sha256,
+)
 
 
 def service_identity(deployment: str = "dger-deployment-A") -> ServiceIdentity:
@@ -33,7 +36,7 @@ def service_identity(deployment: str = "dger-deployment-A") -> ServiceIdentity:
 
 
 def valid_context() -> dict:
-    return {
+    value = {
         "schema": DELEGATED_SERVICE_CONTEXT_SCHEMA,
         "issuer": DELEGATED_SERVICE_CONTEXT_ISSUER,
         "tenant_id": "tenant-A",
@@ -53,8 +56,9 @@ def valid_context() -> dict:
         ],
         "authorized_capability_classes": ["EFFECT", "READ"],
         "project_binding": "ai-me",
-        "context_digest": "sha256:" + "4" * 64,
     }
+    value["context_digest"] = "sha256:" + sha256(canonical_file_bytes(value))
+    return value
 
 
 class DelegatedServiceContextTests(unittest.TestCase):
@@ -80,6 +84,13 @@ class DelegatedServiceContextTests(unittest.TestCase):
         )
         self.assertFalse(hasattr(delegation, "authorize"))
         self.assertFalse(hasattr(delegation, "require_delegated_operation_claim"))
+
+    def test_context_digest_binds_exact_logical_value_but_is_not_authentication(self):
+        raw = valid_context()
+        parse_delegated_service_context(raw)
+        raw["tenant_id"] = "tenant-B"
+        with self.assertRaisesRegex(DgerGen4Error, "DELEGATED_CONTEXT_DIGEST_MISMATCH"):
+            parse_delegated_service_context(raw)
 
     def test_context_is_bound_to_protected_service_not_dropbox_identity(self):
         context = parse_delegated_service_context(valid_context())
