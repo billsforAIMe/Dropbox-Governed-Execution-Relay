@@ -63,9 +63,14 @@ class FakePeers:
     def __init__(self) -> None:
         self.origin = TrustedOrigin(
             tenant_id="tenant-A", principal_id="principal-A", deployment_id="builder-deployment-A",
-            fleet_epoch=7, originating_invocation_id="gtg_inv_" + "a" * 64, context_digest="sha256:" + "1" * 64,
+            actor_role="BUILDER", fleet_epoch=7,
+            originating_invocation_id="gtg_inv_" + "a" * 64, context_digest="sha256:" + "1" * 64,
         )
+        self.service_principal_override: str | None = None
         self.service_deployment_override: str | None = None
+        self.service_role_override: str | None = None
+        self.delegation_invocation_override: str | None = None
+        self.delegated_context_digest_override: str | None = None
         self.request_overrides: dict[str, str | None] = {}
         self.correlation_error: Exception | None = None
         self.stage_error: Exception | None = None
@@ -94,6 +99,7 @@ class FakePeers:
         self.omit_ahc_evidence = False
         self.omit_moh_evidence = False
         self.last_correlation: TrustedCorrelation | None = None
+        self.last_moh_observation_digest: str | None = None
 
     def _evidence(self, tool_id: str, operation: str) -> InvocationEvidence:
         self.invocation_sequence += 1
@@ -115,21 +121,26 @@ class FakePeers:
             "chm_handoff_id": request.get("chm_handoff_id"),
         }
         values.update(self.request_overrides)
+        service_principal = self.service_principal_override or service.service_principal_id
         service_dep = self.service_deployment_override or service.service_deployment_id
+        service_role = self.service_role_override or "EXECUTION_RELAY"
+        delegation_invocation_id = self.delegation_invocation_override or ("gtg_del_" + "b" * 64)
+        delegated_context_digest = self.delegated_context_digest_override or ("sha256:" + "c" * 64)
         evidence: tuple[InvocationEvidence, ...]
         if self.omit_correlation_evidence:
             evidence = ()
         else:
-            items = [
-                self._evidence("governed-execution-platform", "correlation_read"),
-                self._evidence("autonomous-handoff-coordinator", "effect_read"),
-            ]
+            items = [self._evidence("autonomous-handoff-coordinator", "effect_read")]
             if values["chm_handoff_id"] is not None:
-                items.append(self._evidence("common-handoff-manager", "handoff_read"))
+                items.append(self._evidence("common-handoff-manager", "handoff_get"))
             evidence = tuple(items)
         body = {
             "origin": asdict(self.origin),
+            "service_principal_id": service_principal,
             "service_deployment_id": service_dep,
+            "service_role": service_role,
+            "delegation_invocation_id": delegation_invocation_id,
+            "delegated_context_digest": delegated_context_digest,
             "ahc_execution_claim_id": "claim-001",
             "ahc_effect_reservation_id": values["ahc_effect_reservation_id"],
             "ahc_work_revision": "rev-001",
@@ -142,7 +153,11 @@ class FakePeers:
         }
         return TrustedCorrelation(
             origin=self.origin,
+            service_principal_id=service_principal,
             service_deployment_id=service_dep,
+            service_role=service_role,
+            delegation_invocation_id=delegation_invocation_id,
+            delegated_context_digest=delegated_context_digest,
             ahc_execution_claim_id="claim-001",
             ahc_effect_reservation_id=str(values["ahc_effect_reservation_id"]),
             ahc_work_revision="rev-001",
@@ -219,10 +234,11 @@ class FakePeers:
         evidence = None if self.omit_moh_evidence else self._evidence("mac-operation-host", "execute")
         return MohObservation(correlation.gep_execution_id, state, "moh-rec-001", "6" * 64, {"ok": state == "SUCCEEDED"} if state in {"SUCCEEDED", "FAILED"} else None, evidence)
 
-    def ahc_note_in_doubt(self, correlation, moh):
+    def ahc_note_in_doubt(self, correlation, moh_observation_digest):
         self.calls.append("ahc_note_in_doubt")
         if self.note_in_doubt_error:
             raise self.note_in_doubt_error
+        self.last_moh_observation_digest = moh_observation_digest
         self.note_acks += 1
         return Ack(True, "7" * 64, self._evidence("autonomous-handoff-coordinator", "note_moh_in_doubt"))
 
@@ -238,7 +254,7 @@ class FakePeers:
         if self.chm_error:
             raise self.chm_error
         self.chm_acks += 1
-        return Ack(True, "9" * 64, self._evidence("common-handoff-manager", "publish_terminal_result"))
+        return Ack(True, "9" * 64, self._evidence("common-handoff-manager", "handoff_attach_result"))
 
 
 class Gen4Tests(unittest.TestCase):
@@ -267,7 +283,11 @@ class Gen4Tests(unittest.TestCase):
         self.assertEqual(self.peers.process_starts, 1)
         self.assertEqual(self.peers.stage_admission, b"signed-admission-v1")
         providers = {item["tool_id"] for item in s["trusted_correlation"]["provider_evidence"]}
-        self.assertEqual(providers, {"governed-execution-platform", "autonomous-handoff-coordinator", "common-handoff-manager"})
+        self.assertEqual(providers, {"autonomous-handoff-coordinator", "common-handoff-manager"})
+        self.assertEqual(s["trusted_correlation"]["origin"]["actor_role"], "BUILDER")
+        self.assertEqual(s["trusted_correlation"]["service_principal_id"], "dger-service")
+        self.assertEqual(s["trusted_correlation"]["service_role"], "EXECUTION_RELAY")
+        self.assertTrue(s["trusted_correlation"]["delegation_invocation_id"].startswith("gtg_del_"))
         result = json.loads((self.transport / "RunsV2/dger-001/result.json").read_text())
         self.assertEqual(result["moh_invocation_evidence"]["tool_id"], "mac-operation-host")
 
@@ -336,6 +356,25 @@ class Gen4Tests(unittest.TestCase):
 
     def test_wrong_service_deployment_rejected(self):
         self.peers.service_deployment_override = "other-dger"
+        self.relay.process_one(package(self.transport))
+        self.assertEqual(self.peers.execute_calls, 0)
+        self.assertEqual(self.state_record()["phase"], "INGRESS_FROZEN")
+
+    def test_wrong_service_principal_or_role_rejected(self):
+        for field, value in (("service_principal_override", "other-service"), ("service_role_override", "BUILDER")):
+            with self.subTest(field=field):
+                td = tempfile.TemporaryDirectory(); root = Path(td.name); peers = FakePeers(); setattr(peers, field, value)
+                relay = Gen4Relay(root/"transport", root/"state", service_identity=self.service, peers=peers)
+                relay.process_one(package(root/"transport"))
+                self.assertEqual(peers.execute_calls, 0)
+                td.cleanup()
+
+    def test_non_builder_origin_never_becomes_execution_relay_authority(self):
+        self.peers.origin = TrustedOrigin(
+            tenant_id="tenant-A", principal_id="principal-A", deployment_id="reviewer-deployment-A",
+            actor_role="REVIEWER", fleet_epoch=7,
+            originating_invocation_id="gtg_inv_" + "a" * 64, context_digest="sha256:" + "1" * 64,
+        )
         self.relay.process_one(package(self.transport))
         self.assertEqual(self.peers.execute_calls, 0)
         self.assertEqual(self.state_record()["phase"], "INGRESS_FROZEN")
@@ -475,10 +514,12 @@ class Gen4Tests(unittest.TestCase):
         execute_calls = self.peers.execute_calls
         self.peers.note_in_doubt_error = None
         self.relay.scan_once()
-        self.assertEqual(self.state_record()["phase"], "MOH_IN_DOUBT")
+        state = self.state_record()
+        self.assertEqual(state["phase"], "MOH_IN_DOUBT")
         self.assertEqual(self.peers.execute_calls, execute_calls)
-        self.assertTrue(self.state_record()["moh_in_doubt_ever"])
-        self.assertEqual(self.state_record()["ahc_in_doubt_report_ack"]["invocation_evidence"]["tool_id"], "autonomous-handoff-coordinator")
+        self.assertTrue(state["moh_in_doubt_ever"])
+        self.assertEqual(state["ahc_in_doubt_report_ack"]["invocation_evidence"]["tool_id"], "autonomous-handoff-coordinator")
+        self.assertEqual(state["ahc_in_doubt_report_digest"], self.peers.last_moh_observation_digest)
 
     def test_ahc_unavailable_after_moh_terminal_never_reexecutes(self):
         self.peers.ahc_terminal_error = TimeoutError("AHC down")
