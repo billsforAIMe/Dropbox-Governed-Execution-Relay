@@ -25,8 +25,9 @@ Generation-4 source publication is separate from runtime activation. Source publ
 - Dropbox is immutable transport only and never establishes software authority, execution authority, lifecycle authority, or trusted identity.
 - Private accepted DGER State is independent of continued Dropbox package presence and binds exact request/admission/payload/READY bytes plus trusted correlation.
 - Before any MOH execute call, DGER durably records its local reconciliation boundary, requires exact AHC `IN_DOUBT`, obtains exact MOH status truth, then durably records that the MOH execute call may have happened.
-- After an ambiguous/lost MOH call, DGER reconciles status before any possible same-ID retry. Only exact fresh `NOT_FOUND`/`ADMITTED` truth can permit a retry; transport retry, provider advancement, CHM state, wake state, service restart, or lease expiry cannot.
-- MOH `IN_DOUBT` is monotonic for DGER execution permission: once observed, DGER never executes that GEP execution again and retries only AHC in-doubt reporting.
+- After an ordinary ambiguous/lost MOH call, DGER reconciles status before any possible same-ID retry. Only exact fresh `NOT_FOUND`/`ADMITTED` truth can permit that retry; transport retry, provider advancement, CHM state, wake state, service restart, or lease expiry cannot.
+- If a response arrives after MOH execute but fails exact correlation, provider-identity, or operation-evidence validation, DGER sets the monotonic `INVALID_EXECUTE_RESPONSE` no-repeat latch. Later valid status may establish terminal truth, but even `NOT_FOUND`/`ADMITTED` cannot restore execute permission.
+- An exact MOH `IN_DOUBT` observation is likewise monotonic for DGER execution permission: once observed, DGER never executes that GEP execution again and retries only AHC in-doubt reporting.
 - Durable MOH terminal truth is published to AHC before optional CHM history/result publication. AHC/CHM outages after MOH terminal can retry only their own idempotent reporting phases, never host execution.
 - Exact result replay is idempotent; changed-byte replay/correlation is a conflict.
 
