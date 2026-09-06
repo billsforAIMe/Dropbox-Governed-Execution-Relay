@@ -5,6 +5,7 @@ import importlib.util
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 
 HERE = Path(__file__).resolve().parent
@@ -54,6 +55,27 @@ def governed_find_exe(*names: str) -> str:
             if found is not None:
                 return found
     raise RuntimeError("EXECUTABLE_NOT_FOUND:" + ",".join(names))
+
+
+def corrected_run(args: list[str], *, env: dict[str, str] | None = None, input_text: str | None = None,
+                  timeout: int = 120, check: bool = True) -> subprocess.CompletedProcess[str]:
+    kwargs: dict[str, object] = {
+        "args": args,
+        "env": env,
+        "text": True,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "timeout": timeout,
+        "check": False,
+    }
+    if input_text is None:
+        kwargs["stdin"] = subprocess.DEVNULL
+    else:
+        kwargs["input"] = input_text
+    cp = subprocess.run(**kwargs)
+    if check and cp.returncode != 0:
+        raise RuntimeError(f"COMMAND_FAILED:{Path(args[0]).name}:{cp.returncode}:{cp.stderr[-800:]}")
+    return cp
 
 
 def load_carrier():
@@ -125,6 +147,9 @@ def self_test() -> None:
     gs = governed_find_exe("/usr/local/bin/gitstorage", "/opt/homebrew/bin/gitstorage", "gitstorage")
     if gs != str(GITSTORAGE_RUNTIME.resolve(strict=True)):
         raise RuntimeError("GITSTORAGE_RUNTIME_RESOLUTION_SELFTEST_FAILED")
+    probe = corrected_run(["/bin/cat"], input_text="runner-input-probe\n", timeout=10)
+    if probe.stdout != "runner-input-probe\n":
+        raise RuntimeError("INPUT_SUBPROCESS_SELFTEST_FAILED")
     require_zero_write_deploy_keys([{"id": 1, "read_only": True}])
     try:
         require_zero_write_deploy_keys([{"id": 2, "read_only": False}])
@@ -135,6 +160,7 @@ def self_test() -> None:
         raise RuntimeError("DEPLOY_KEY_GUARD_SELFTEST_FAIL_OPEN")
     module = load_carrier()
     module.find_exe = governed_find_exe
+    module.run = corrected_run
     saved = sys.argv[:]
     try:
         sys.argv = [str(CARRIER), "--self-test"]
@@ -152,6 +178,7 @@ def main() -> None:
         raise RuntimeError("UNEXPECTED_ARGUMENTS")
     module = load_carrier()
     module.find_exe = governed_find_exe
+    module.run = corrected_run
     install_deploy_key_guard(module)
     saved = sys.argv[:]
     caught: BaseException | None = None
