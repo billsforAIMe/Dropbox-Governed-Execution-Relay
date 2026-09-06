@@ -16,6 +16,7 @@ MOH_TOOL_ID = "mac-operation-host"
 CHM_TOOL_ID = "common-handoff-manager"
 _HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
 _GTG_INVOCATION_ID_RE = re.compile(r"^gtg_inv_[0-9a-f]{64}$")
+_GTG_DELEGATION_ID_RE = re.compile(r"^gtg_del_[0-9a-f]{64}$")
 _GTG_CONTEXT_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -48,6 +49,7 @@ class TrustedOrigin:
     tenant_id: str
     principal_id: str
     deployment_id: str
+    actor_role: str
     fleet_epoch: int
     originating_invocation_id: str
     context_digest: str
@@ -56,7 +58,11 @@ class TrustedOrigin:
 @dataclass(frozen=True)
 class TrustedCorrelation:
     origin: TrustedOrigin
+    service_principal_id: str
     service_deployment_id: str
+    service_role: str
+    delegation_invocation_id: str
+    delegated_context_digest: str
     ahc_execution_claim_id: str
     ahc_effect_reservation_id: str
     ahc_work_revision: str
@@ -104,23 +110,28 @@ class Ack:
 
 
 class Gen4Peers(Protocol):
-    """Internal semantic port. Wire/auth translation belongs to the exact delivered peer adapter.
+    """Internal semantic port. Wire/auth translation belongs to exact delivered peer adapters.
 
     Implementations MUST invoke semantic peers under the protected DGER service
-    credential/delegated context. No method accepts identity from Dropbox as authority.
-    Every successful semantic peer call MUST return exact invocation-time GTG provider
-    identity evidence bound to the exact normalized operation DGER requested.
+    credential and the exact GTG-authenticated delegated context. No method accepts
+    identity from Dropbox as authority. Every successful semantic peer call MUST
+    return exact invocation-time GTG provider identity evidence bound to the exact
+    normalized operation DGER requested.
 
-    ``stage_moh`` is deliberately different: in this source-ready pre-activation contract it
-    is only local, non-effectful materialization of already authenticated immutable bytes into
-    the MOH staging substrate. Its receipt MUST say ``LOCAL_MATERIALIZATION`` and it MUST NOT
-    perform a semantic peer invocation or start a process. If a delivered peer tuple later
-    requires remote/semantic staging, that adapter contract is changed input and must add exact
-    invocation evidence under change-driven review rather than silently reusing this receipt.
+    ``establish_correlation`` may consume only delivered peer source contracts. The
+    current authoritative GEP source does not expose the post-#94 trusted execution-
+    binding/correlation operation DGER ultimately requires, so a production adapter
+    must remain unavailable rather than inventing ``correlation_read`` or an alias.
+    AHC's five DGER effect semantics, by contrast, are source-delivered and may be
+    composed even while their runtime front door remains unavailable.
 
-    The production adapter is intentionally unavailable until GTG/GTC #94 and the exact
-    AHC/GEP/CHM/MOH contracts ship; it must enforce delivered peer currentness/compatibility
-    before returning.
+    ``stage_moh`` is deliberately different: in this source-ready pre-activation
+    contract it is only local, non-effectful materialization of already authenticated
+    immutable bytes into the MOH staging substrate. Its receipt MUST say
+    ``LOCAL_MATERIALIZATION`` and it MUST NOT perform a semantic peer invocation or
+    start a process. If a delivered peer tuple later requires remote/semantic staging,
+    that adapter contract is changed input and must add exact invocation evidence
+    under change-driven review rather than silently reusing this receipt.
     """
 
     def establish_correlation(
@@ -135,7 +146,7 @@ class Gen4Peers(Protocol):
     def ahc_status(self, correlation: TrustedCorrelation) -> AhcObservation: ...
     def moh_execute(self, correlation: TrustedCorrelation) -> MohObservation: ...
     def moh_status(self, correlation: TrustedCorrelation) -> MohObservation: ...
-    def ahc_note_in_doubt(self, correlation: TrustedCorrelation, moh: MohObservation) -> Ack: ...
+    def ahc_note_in_doubt(self, correlation: TrustedCorrelation, moh_observation_digest: str) -> Ack: ...
     def ahc_accept_terminal(self, correlation: TrustedCorrelation, terminal_digest: str, result_ref: str, result_sha256: str) -> Ack: ...
     def chm_publish_terminal(self, correlation: TrustedCorrelation, result_ref: str, result_sha256: str) -> Ack: ...
 
@@ -221,7 +232,11 @@ def _correlation_to_dict(c: TrustedCorrelation) -> dict[str, Any]:
     return {
         "schema": TRUSTED_CORRELATION_SCHEMA,
         "origin": asdict(c.origin),
+        "service_principal_id": c.service_principal_id,
         "service_deployment_id": c.service_deployment_id,
+        "service_role": c.service_role,
+        "delegation_invocation_id": c.delegation_invocation_id,
+        "delegated_context_digest": c.delegated_context_digest,
         "ahc_execution_claim_id": c.ahc_execution_claim_id,
         "ahc_effect_reservation_id": c.ahc_effect_reservation_id,
         "ahc_work_revision": c.ahc_work_revision,
@@ -236,14 +251,15 @@ def _correlation_to_dict(c: TrustedCorrelation) -> dict[str, Any]:
 
 def _correlation_from_dict(value: dict[str, Any]) -> TrustedCorrelation:
     expected = {
-        "schema", "origin", "service_deployment_id", "ahc_execution_claim_id", "ahc_effect_reservation_id",
-        "ahc_work_revision", "gep_execution_id", "gep_request_digest", "gep_admission_sha256", "chm_handoff_id",
-        "correlation_digest", "provider_evidence",
+        "schema", "origin", "service_principal_id", "service_deployment_id", "service_role",
+        "delegation_invocation_id", "delegated_context_digest", "ahc_execution_claim_id",
+        "ahc_effect_reservation_id", "ahc_work_revision", "gep_execution_id", "gep_request_digest",
+        "gep_admission_sha256", "chm_handoff_id", "correlation_digest", "provider_evidence",
     }
     if set(value) != expected or value.get("schema") != TRUSTED_CORRELATION_SCHEMA or not isinstance(value.get("origin"), dict):
         raise DgerGen4Error("TRUSTED_CORRELATION_STATE_INVALID")
     o = value["origin"]
-    origin_expected = {"tenant_id", "principal_id", "deployment_id", "fleet_epoch", "originating_invocation_id", "context_digest"}
+    origin_expected = {"tenant_id", "principal_id", "deployment_id", "actor_role", "fleet_epoch", "originating_invocation_id", "context_digest"}
     if set(o) != origin_expected:
         raise DgerGen4Error("TRUSTED_ORIGIN_STATE_INVALID")
     raw_evidence = value.get("provider_evidence")
@@ -251,11 +267,16 @@ def _correlation_from_dict(value: dict[str, Any]) -> TrustedCorrelation:
         raise DgerGen4Error("TRUSTED_PROVIDER_EVIDENCE_STATE_INVALID")
     origin = TrustedOrigin(
         tenant_id=str(o["tenant_id"]), principal_id=str(o["principal_id"]), deployment_id=str(o["deployment_id"]),
-        fleet_epoch=int(o["fleet_epoch"]), originating_invocation_id=str(o["originating_invocation_id"]), context_digest=str(o["context_digest"]),
+        actor_role=str(o["actor_role"]), fleet_epoch=int(o["fleet_epoch"]),
+        originating_invocation_id=str(o["originating_invocation_id"]), context_digest=str(o["context_digest"]),
     )
     return TrustedCorrelation(
         origin=origin,
+        service_principal_id=str(value["service_principal_id"]),
         service_deployment_id=str(value["service_deployment_id"]),
+        service_role=str(value["service_role"]),
+        delegation_invocation_id=str(value["delegation_invocation_id"]),
+        delegated_context_digest=str(value["delegated_context_digest"]),
         ahc_execution_claim_id=str(value["ahc_execution_claim_id"]),
         ahc_effect_reservation_id=str(value["ahc_effect_reservation_id"]),
         ahc_work_revision=str(value["ahc_work_revision"]),
@@ -270,25 +291,40 @@ def _correlation_from_dict(value: dict[str, Any]) -> TrustedCorrelation:
 
 def _validate_correlation(c: TrustedCorrelation, request: dict[str, Any], admission_sha256: str, payload_manifest_sha256: str, service: ServiceIdentity) -> None:
     # Trusted fields are produced by the authenticated peer adapter, never accepted
-    # from transport. DGER only proves that routing/correlation hints match that truth.
+    # from transport. DGER proves only their internal consistency and correlation to
+    # its immutable transport intent; it does not authenticate the serialized values.
     for value, code in (
         (c.origin.tenant_id, "TRUSTED_TENANT_INVALID"), (c.origin.principal_id, "TRUSTED_PRINCIPAL_INVALID"),
         (c.origin.deployment_id, "TRUSTED_ORIGIN_DEPLOYMENT_INVALID"),
+        (c.service_principal_id, "TRUSTED_SERVICE_ID_INVALID"),
         (c.ahc_execution_claim_id, "TRUSTED_AHC_CLAIM_INVALID"), (c.ahc_effect_reservation_id, "TRUSTED_AHC_EFFECT_INVALID"),
         (c.ahc_work_revision, "TRUSTED_AHC_REVISION_INVALID"), (c.gep_execution_id, "TRUSTED_GEP_EXECUTION_INVALID"),
     ):
         _safe_id(value, code)
+    # The delivered AHC DGER effect bridge is specifically an originating Builder
+    # effect. Preserving this value is not impersonation: DGER remains the immediate
+    # EXECUTION_RELAY service actor and never substitutes itself for the origin.
+    if c.origin.actor_role != "BUILDER":
+        raise DgerGen4Error("TRUSTED_ORIGIN_ROLE_INVALID")
     if _GTG_INVOCATION_ID_RE.fullmatch(c.origin.originating_invocation_id) is None:
         raise DgerGen4Error("TRUSTED_INVOCATION_INVALID")
     if c.origin.fleet_epoch < 1:
         raise DgerGen4Error("TRUSTED_FLEET_EPOCH_INVALID")
     if _GTG_CONTEXT_DIGEST_RE.fullmatch(c.origin.context_digest) is None:
         raise DgerGen4Error("TRUSTED_CONTEXT_DIGEST_INVALID")
+    if c.service_role != "EXECUTION_RELAY" or service.actor_role != "EXECUTION_RELAY":
+        raise DgerGen4Error("SERVICE_ROLE_INVALID")
+    if c.service_principal_id != service.service_principal_id:
+        raise DgerGen4Error("WRONG_DGER_SERVICE_ID")
+    if c.service_deployment_id != service.service_deployment_id:
+        raise DgerGen4Error("WRONG_DGER_SERVICE_DEPLOYMENT")
+    if _GTG_DELEGATION_ID_RE.fullmatch(c.delegation_invocation_id) is None:
+        raise DgerGen4Error("TRUSTED_DELEGATION_INVOCATION_INVALID")
+    if _GTG_CONTEXT_DIGEST_RE.fullmatch(c.delegated_context_digest) is None:
+        raise DgerGen4Error("TRUSTED_DELEGATED_CONTEXT_DIGEST_INVALID")
     for value, code in ((c.gep_request_digest, "TRUSTED_GEP_REQUEST_DIGEST_INVALID"), (c.gep_admission_sha256, "TRUSTED_ADMISSION_DIGEST_INVALID"), (c.correlation_digest, "TRUSTED_CORRELATION_DIGEST_INVALID")):
         if HEX64_RE.fullmatch(value) is None:
             raise DgerGen4Error(code)
-    if c.service_deployment_id != service.service_deployment_id:
-        raise DgerGen4Error("WRONG_DGER_SERVICE_DEPLOYMENT")
     if c.gep_execution_id != request["gep_execution_id"]:
         raise DgerGen4Error("GEP_EXECUTION_MISMATCH")
     if c.ahc_effect_reservation_id != request["ahc_effect_reservation_id"]:
@@ -302,18 +338,23 @@ def _validate_correlation(c: TrustedCorrelation, request: dict[str, Any], admiss
     invocation_ids = [item.invocation_id for item in evidence]
     if len(invocation_ids) != len(set(invocation_ids)):
         raise DgerGen4Error("GTG_INVOCATION_EVIDENCE_DUPLICATE")
-    required_pairs = {
-        (GEP_TOOL_ID, "correlation_read"),
-        (AHC_TOOL_ID, "effect_read"),
-    }
+    # Require only exact source-delivered semantic operations. Authoritative GEP Gen13
+    # has no post-#94 trusted correlation-read operation, so DGER deliberately does
+    # not invent one here. That missing GEP source contract remains the narrow source
+    # blocker for a production establish_correlation adapter.
+    required_pairs = {(AHC_TOOL_ID, "effect_read")}
     if c.chm_handoff_id is not None:
-        required_pairs.add((CHM_TOOL_ID, "handoff_read"))
+        required_pairs.add((CHM_TOOL_ID, "handoff_get"))
     if {(item.tool_id, item.operation) for item in evidence} != required_pairs:
         raise DgerGen4Error("TRUSTED_CORRELATION_PROVIDER_SET_INVALID")
 
     expected_corr = canonical_digest({
         "origin": asdict(c.origin),
+        "service_principal_id": c.service_principal_id,
         "service_deployment_id": c.service_deployment_id,
+        "service_role": c.service_role,
+        "delegation_invocation_id": c.delegation_invocation_id,
+        "delegated_context_digest": c.delegated_context_digest,
         "ahc_execution_claim_id": c.ahc_execution_claim_id,
         "ahc_effect_reservation_id": c.ahc_effect_reservation_id,
         "ahc_work_revision": c.ahc_work_revision,
