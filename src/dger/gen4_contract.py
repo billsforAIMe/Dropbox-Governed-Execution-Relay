@@ -280,7 +280,7 @@ def _validate_correlation(c: TrustedCorrelation, request: dict[str, Any], admiss
         _safe_id(value, code)
     if _GTG_INVOCATION_ID_RE.fullmatch(c.origin.originating_invocation_id) is None:
         raise DgerGen4Error("TRUSTED_INVOCATION_INVALID")
-    if c.origin.fleet_epoch < 0:
+    if c.origin.fleet_epoch < 1:
         raise DgerGen4Error("TRUSTED_FLEET_EPOCH_INVALID")
     if _GTG_CONTEXT_DIGEST_RE.fullmatch(c.origin.context_digest) is None:
         raise DgerGen4Error("TRUSTED_CONTEXT_DIGEST_INVALID")
