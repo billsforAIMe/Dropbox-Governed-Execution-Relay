@@ -13,6 +13,7 @@ suite = unittest.TestSuite()
 for name in (
     "test_relay_v1_core", "test_relay_v1_safety", "test_relay_v1_safety_more",
     "test_relay_v1_transport_recovery", "test_review_corrections", "test_gtg_http", "test_gen4",
+    "test_gen4_provider_evidence",
 ):
     suite.addTests(unittest.defaultTestLoader.loadTestsFromName(name))
 
