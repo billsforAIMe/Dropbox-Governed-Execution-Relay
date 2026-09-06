@@ -64,6 +64,12 @@ class LegacyOriginDigestPeers(FakePeers):
         self.origin = replace(self.origin, context_digest="1" * 64)
 
 
+class ZeroFleetEpochPeers(FakePeers):
+    def __init__(self):
+        super().__init__()
+        self.origin = replace(self.origin, fleet_epoch=0)
+
+
 class WrongBeginOperationPeers(FakePeers):
     def ahc_begin(self, correlation):
         obs = super().ahc_begin(correlation)
@@ -143,6 +149,16 @@ class ProviderOperationEvidenceTests(unittest.TestCase):
 
     def test_bare_origin_context_digest_alias_is_rejected(self):
         peers = LegacyOriginDigestPeers()
+        td, _root, _relay, state = self._run(peers)
+        try:
+            self.assertEqual(state["phase"], "INGRESS_FROZEN")
+            self.assertNotIn("stage", peers.calls)
+            self.assertEqual(peers.execute_calls, 0)
+        finally:
+            td.cleanup()
+
+    def test_zero_gtg_fleet_epoch_is_rejected(self):
+        peers = ZeroFleetEpochPeers()
         td, _root, _relay, state = self._run(peers)
         try:
             self.assertEqual(state["phase"], "INGRESS_FROZEN")
