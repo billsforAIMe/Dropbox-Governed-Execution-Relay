@@ -191,27 +191,3 @@ def require_protected_service_match(context: DelegatedServiceContext, service: S
         raise DgerGen4Error("WRONG_DGER_SERVICE_ID")
     if context.service_deployment_id != service.service_deployment_id:
         raise DgerGen4Error("WRONG_DGER_SERVICE_DEPLOYMENT")
-
-
-def require_delegated_operation_claim(
-    context: DelegatedServiceContext,
-    *,
-    tool_id: str,
-    operation: str,
-    authority_class: str,
-) -> None:
-    """Check consistency with an already-authenticated GTG/GTC decision.
-
-    This function MUST NOT be used to turn an unauthenticated serialized context into
-    authority. GTG/GTC owns authentication and the origin ∩ EXECUTION_RELAY ∩ target
-    policy decision; DGER merely refuses a peer call not named by that admitted result.
-    """
-    if authority_class not in _CAPABILITY_CLASSES:
-        raise DgerGen4Error("DELEGATED_CONTEXT_CAPABILITY_INVALID")
-    tool = _require_id(tool_id, "DELEGATED_CONTEXT_TOOL_INVALID")
-    op = _require_id(operation, "DELEGATED_CONTEXT_OPERATION_INVALID")
-    operation_id = f"tool:{tool}:{op}"
-    if operation_id not in context.authorized_operations:
-        raise DgerGen4Error("OPERATION_DENIED")
-    if authority_class not in context.authorized_capability_classes:
-        raise DgerGen4Error("OPERATION_DENIED")
