@@ -79,8 +79,11 @@ def main() -> int:
         '_validate_ack(ack, AHC_TOOL_ID, "accept_terminal_effect")',
         '_validate_ack(ack, CHM_TOOL_ID, "publish_terminal_result")',
         '"moh_invocation_evidence"',
+        'state["moh_execute_response_invalid"] = True',
+        'state["moh_in_doubt_source"] = "INVALID_EXECUTE_RESPONSE"',
+        'state["moh_in_doubt_ever"] = True',
     ):
-        if token not in gen4: fail(f"PROVIDER_EVIDENCE_EFFECT_TOKEN_MISSING:{token}")
+        if token not in gen4: fail(f"PROVIDER_OR_NOREPEAT_TOKEN_MISSING:{token}")
 
     contract = (ROOT / "src/dger/gen4_contract.py").read_text("utf-8")
     if "GEN4_PEER_CONTRACTS_UNAVAILABLE" not in contract: fail("PRODUCTION_FAIL_CLOSED_MISSING")
@@ -98,6 +101,9 @@ def main() -> int:
         fail("STAGING_SURFACE_CLASS")
     if "LOCAL_MATERIALIZATION" not in str(staging.get("mechanical_guard", "")):
         fail("STAGING_SURFACE_GUARD")
+    execution = next((x for x in surfaces if x.get("id") == "gen4-moh-effect-port"), None)
+    if not isinstance(execution, dict) or "INVALID_EXECUTE_RESPONSE" not in str(execution.get("mechanical_guard", "")):
+        fail("EXECUTE_INVALID_RESPONSE_GUARD")
 
     # Mechanically enumerate process-start/semantic execute primitives in DGER Python.
     findings: list[str] = []
