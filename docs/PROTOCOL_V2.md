@@ -52,7 +52,7 @@ The exact production peer adapter must consume GTG/GTC's delivered delegated-ser
 
 The normalized trusted correlation retained by DGER also binds distinct AHC execution claim, AHC effect reservation, AHC work revision, GEP execution, GEP request digest, exact admission digest, optional CHM handoff correlation, and payload-closure proof. Cross-tenant/principal/deployment/epoch/service replay must be rejected by authenticated peer truth before execution.
 
-Every successful semantic peer call must also carry exact invocation-time GTG provider identity evidence: `tool_id`, operation, GTG `invocation_id`, exact Tool commit, exact Tool tree, exact GTG commit, and exact Registry commit. Correlation establishment must retain the exact GEP and AHC provider evidence and, when CHM correlation is used, the exact CHM provider evidence. AHC and MOH observations plus AHC/CHM acknowledgements likewise retain their own invocation-time provider evidence. DGER never manufactures that evidence from transport or peer payload fields.
+Every successful **semantic** peer call must also carry exact invocation-time GTG provider identity evidence: `tool_id`, the exact normalized operation, GTG `invocation_id`, exact Tool commit, exact Tool tree, exact GTG commit, and exact Registry commit. Correlation establishment requires exactly GEP `correlation_read` and AHC `effect_read`, plus CHM `handoff_read` when CHM correlation is present. Later AHC/MOH/CHM results must match the exact normalized operation DGER actually invoked (`begin_effect`, `effect_status`, `status`, `execute`, `note_moh_in_doubt`, `accept_terminal_effect`, or `publish_terminal_result` as applicable). Same-Tool evidence for a different operation is invalid. DGER never manufactures provider evidence from transport or peer payload fields.
 
 The exact delivered peer adapter is responsible for proving GTG/GTC currentness, authorization, and peer release compatibility before returning a successful normalized result. A provider may advance without forcing a new host execution only when that governed adapter accepts the invocation as current-compatible; DGER records the actual invocation-time provider identity. A compatibility/currentness rejection remains a blocked peer call and cannot reopen MOH execution.
 
@@ -64,13 +64,15 @@ For one accepted execution, DGER's durable order is:
 
 1. freeze and positively verify private ingress;
 2. establish exact trusted AHC/GEP/CHM correlation through the authenticated DGER service context;
-3. stage and verify exact MOH material, preserving admission bytes unchanged;
+3. locally materialize and verify exact MOH staging bytes, preserving admission bytes unchanged and performing no semantic peer invocation or process start;
 4. durably enter `PRE_AHC_EXECUTE_WAL` (`execute_reconciliation_required=true`);
 5. invoke the exact delegated AHC `begin` operation;
 6. require exact AHC `IN_DOUBT` for the bound effect;
 7. reconcile exact MOH status before first/any possible execute;
 8. durably write `moh_execute_call_may_have_happened=true` immediately before the MOH execute call;
 9. only then invoke MOH `execute`.
+
+The Generation-4 source contract classifies `stage_moh` specifically as `LOCAL_MATERIALIZATION`. Its receipt must say `LOCAL_MATERIALIZATION`; any other stage kind fails closed. A later delivered architecture that requires a remote/semantic MOH staging operation is changed input: that adapter must return exact invocation-time evidence for the staging operation and receive change-driven review rather than silently treating a semantic call as local preparation.
 
 MOH execute can never precede AHC's durable `IN_DOUBT` observation.
 
@@ -106,7 +108,7 @@ Generation 4 removes Gen3's CHM `STARTED` execution-entitlement interpretation f
 
 ## Production peer adapter boundary
 
-`Gen4Peers` is an internal semantic port used to make DGER's own ordering/recovery logic independently testable. It is **not** a wire contract and ordinary callers cannot implement it as authority.
+`Gen4Peers` is an internal normalization port used to make DGER's own ordering/recovery logic independently testable. It is **not** a wire contract and ordinary callers cannot implement it as authority. Its semantic operations require exact operation-bound GTG invocation evidence. The `stage_moh` method is the explicit non-semantic exception in this source release and is restricted to local, non-effectful staging materialization as described above.
 
 `UnavailableGen4Peers` is the only source-published production placeholder until exact peer contracts are delivered. It fails all peer operations closed. A later DGER-only follow-on may bind those exact delivered interfaces without changing peer-owned security semantics; that changed input requires change-driven review only for the new material adapter proposition.
 
