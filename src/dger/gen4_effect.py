@@ -68,8 +68,6 @@ class Gen4EffectMixin:
         _validate_ahc(obs, c, "effect_status")
         state["last_ahc_status"] = asdict(obs)
         if obs.state == "RESERVED":
-            # Exact AHC truth proves begin did not durably happen. Retrying begin is
-            # an AHC-idempotent lifecycle operation, not a host execution retry.
             state["phase"] = "PRE_AHC_EXECUTE_WAL"
             self._save_state(rid, state)
             return
@@ -88,6 +86,7 @@ class Gen4EffectMixin:
         state["last_moh_observed_via"] = via
         if obs.state == "IN_DOUBT":
             state["moh_in_doubt_ever"] = True
+            state["moh_in_doubt_source"] = "MOH_OBSERVATION"
             state["phase"] = "MOH_IN_DOUBT_AHC_PENDING"
             state["moh_in_doubt_observation"] = asdict(obs)
             self._save_state(rid, state); self._status(rid, "MOH_IN_DOUBT_AHC_PENDING")
@@ -105,8 +104,6 @@ class Gen4EffectMixin:
             state["phase"] = "MOH_RECONCILE"
             self._save_state(rid, state); self._status(rid, f"MOH_{obs.state}")
             return
-        # NOT_FOUND / ADMITTED are handled by the caller because their safety meaning
-        # depends on whether this is a fresh pre-execute proof or status-first recovery.
         state["last_safe_moh_status"] = asdict(obs)
         state["phase"] = "AHC_IN_DOUBT"
         state["pre_execute_status_required"] = False
@@ -134,9 +131,6 @@ class Gen4EffectMixin:
             state["phase"] = "MOH_IN_DOUBT"; self._save_state(rid, state); return
         if state.get("pre_execute_status_required") is not False or not isinstance(state.get("last_safe_moh_status"), dict):
             raise DgerGen4Error("MOH_STATUS_PROOF_REQUIRED")
-        # Second write-ahead sits immediately on the MOH call boundary. The earlier
-        # PRE_AHC WAL satisfies the cross-authority ordering requirement; this flag
-        # distinguishes whether the process-start call itself may have left DGER.
         state["moh_execute_call_may_have_happened"] = True
         state["moh_execute_calls"] = int(state.get("moh_execute_calls", 0)) + 1
         state["phase"] = "MOH_RECONCILE"
@@ -147,7 +141,20 @@ class Gen4EffectMixin:
             obs = self.peers.moh_execute(c)
         except Exception as exc:
             self._record_error(state, "moh_execute", exc); self._save_state(rid, state); self._status(rid, "MOH_EXECUTE_AMBIGUOUS", code=self._error_code(exc)); return
-        self._handle_moh(state, obs, "execute")
+        try:
+            self._handle_moh(state, obs, "execute")
+        except DgerGen4Error as exc:
+            # The process-start call has already left DGER. A response that cannot be
+            # authenticated/correlated to the exact MOH execute operation is itself
+            # execution ambiguity. Status may still prove terminal truth, but even a
+            # later NOT_FOUND/ADMITTED observation must never reopen execute permission.
+            self._record_error(state, "moh_execute_response", exc)
+            state["moh_in_doubt_ever"] = True
+            state["moh_in_doubt_source"] = "INVALID_EXECUTE_RESPONSE"
+            state["moh_execute_response_invalid"] = True
+            self._save_state(rid, state)
+            self._status(rid, "MOH_EXECUTE_RESPONSE_INVALID", code=exc.code)
+            return
 
     def _reconcile_moh(self, state: dict[str, Any]) -> None:
         rid = state["dger_request_id"]; c = self._c(state)
@@ -159,9 +166,7 @@ class Gen4EffectMixin:
         _validate_moh(obs, c, "status")
         if obs.state in MOH_SAFE_TO_FIRST_OR_PROVEN_RETRY:
             if state.get("moh_in_doubt_ever") is True:
-                state["phase"] = "MOH_IN_DOUBT"; self._save_state(rid, state); return
-            # A fresh exact status proof is what permits same-ID retry after an
-            # ambiguous/lost execute response. Transport retry alone never does.
+                state["phase"] = "MOH_IN_DOUBT"; self._save_state(rid, state); self._status(rid, "MOH_IN_DOUBT"); return
             state["last_safe_moh_status"] = asdict(obs)
             state["pre_execute_status_required"] = False
             state["phase"] = "AHC_IN_DOUBT"
