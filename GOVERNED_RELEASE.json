@@ -31,9 +31,10 @@
   },
   "manifest_schema_major": 1,
   "normative_files": [
-    "docs/PROTOCOL_V1.md"
+    "docs/PROTOCOL_V2.md",
+    "GOVERNED_EFFECT_SURFACE_INVENTORY.json"
   ],
-  "release_generation": 3,
+  "release_generation": 4,
   "release_selector_contract": {
     "ancestry_preserving_forward_cas": true,
     "delivered_objects_remain_reachable": true,
@@ -42,11 +43,13 @@
   },
   "rolls_back_to_generation": null,
   "runtime_compatibility": {
-    "compatible_runtime_commits": [],
-    "note": "Generation 3 replaces Prototype R0 singleton/GEP/CHM bindings with MOH plus logical-CHM semantic integration; no earlier installed runtime is declared compatible.",
+    "compatible_runtime_commits": [
+      "42543696c544d3bc287e65da78d07751db310e58"
+    ],
+    "note": "Generation 4 is a source-ready pre-activation release. The exact delivered Generation-3 runtime at 42543696c544d3bc287e65da78d07751db310e58 may remain selected only before protected Gen4 activation State exists. Gen4 production peer operations intentionally fail closed until the exact delivered GTG/GTC, AHC, GEP, CHM, and MOH tuple is current-compatible and callable. Gen4 activation/deployment is a separate governed act and is not authorized by this compatibility declaration.",
     "policy": "exact_or_explicit_immutable_tool_release_declaration"
   },
-  "supersedes_generation": 2,
+  "supersedes_generation": 3,
   "tool_id": "dropbox-governed-execution-relay",
   "withdrawn_generations": []
 }
