@@ -1,7 +1,7 @@
 {
   "schema": "governed-effect-surface-inventory/v1",
   "tool_id": "dropbox-governed-execution-relay",
-  "inventory_version": "gen4-source-candidate-2",
+  "inventory_version": "gen4-source-candidate-3",
   "effect_family": "asynchronous-mac-execution-relay",
   "surfaces": [
     {
@@ -61,12 +61,20 @@
       "mechanical_guard": "exact Gen4Peers implementation required"
     },
     {
+      "id": "gen4-moh-staging",
+      "path": "src/dger/gen4_effect.py",
+      "symbols": ["Gen4Peers.stage_moh", "Gen4EffectMixin._stage"],
+      "class": "GEN4_MOH_STAGING_PREPARATION",
+      "post_gen4_status": "SOURCE_READY_PREACTIVATION_LOCAL_ONLY",
+      "mechanical_guard": "receipt stage_kind must equal LOCAL_MATERIALIZATION; no semantic peer invocation or process start; remote/semantic staging is changed input requiring operation-bound evidence and review"
+    },
+    {
       "id": "gen4-moh-effect-port",
       "path": "src/dger/gen4_effect.py",
       "symbols": ["Gen4Peers.moh_execute", "Gen4EffectMixin._execute_moh"],
       "class": "GEN4_MOH_EXECUTION_EFFECT",
       "post_gen4_status": "SOURCE_READY_PREACTIVATION",
-      "mechanical_guard": "PRE_AHC_EXECUTE_WAL + authenticated AHC IN_DOUBT + MOH status proof + MOH execute-call WAL + exact invocation-time MOH provider evidence"
+      "mechanical_guard": "PRE_AHC_EXECUTE_WAL + authenticated AHC IN_DOUBT + MOH status proof + MOH execute-call WAL + exact invocation-time MOH provider evidence bound to operation"
     },
     {
       "id": "gen4-ahc-effect-port",
@@ -74,7 +82,7 @@
       "symbols": ["Gen4Peers.ahc_begin", "Gen4Peers.ahc_accept_terminal", "Gen4Peers.ahc_note_in_doubt"],
       "class": "GEN4_LIFECYCLE_BRIDGE",
       "post_gen4_status": "SOURCE_READY_PREACTIVATION",
-      "mechanical_guard": "trusted correlation + protected EXECUTION_RELAY service identity + exact invocation-time AHC provider evidence"
+      "mechanical_guard": "trusted correlation + protected EXECUTION_RELAY service identity + exact invocation-time AHC provider evidence bound to operation"
     },
     {
       "id": "gen4-chm-history-port",
@@ -82,7 +90,7 @@
       "symbols": ["Gen4Peers.chm_publish_terminal"],
       "class": "GEN4_HISTORY_RESULT_EFFECT",
       "post_gen4_status": "SOURCE_READY_PREACTIVATION",
-      "mechanical_guard": "AHC terminal acceptance precedes CHM publication + exact invocation-time CHM provider evidence"
+      "mechanical_guard": "AHC terminal acceptance precedes CHM publication + exact invocation-time CHM provider evidence bound to operation"
     },
     {
       "id": "gen4-production-peer-adapter",
@@ -90,7 +98,7 @@
       "symbols": ["UnavailableGen4Peers"],
       "class": "PRODUCTION_PEER_ADAPTER",
       "post_gen4_status": "FAIL_CLOSED_PENDING_EXACT_PEER_TUPLE",
-      "mechanical_guard": "GEN4_PEER_CONTRACTS_UNAVAILABLE; delivered adapter must establish delegated actor context, current-compatible peer calls, and exact invocation-time provider evidence"
+      "mechanical_guard": "GEN4_PEER_CONTRACTS_UNAVAILABLE; delivered adapter must establish delegated actor context, current-compatible peer calls, and exact operation-bound invocation-time provider evidence"
     },
     {
       "id": "deployment-admin",
