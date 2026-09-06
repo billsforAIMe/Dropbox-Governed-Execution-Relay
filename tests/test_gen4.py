@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from dger.gen4 import (
-    Ack, AhcObservation, DgerGen4Error, Gen4Relay, MohObservation, REQUEST_SCHEMA,
+    Ack, AhcObservation, DgerGen4Error, Gen4Relay, InvocationEvidence, MohObservation, REQUEST_SCHEMA,
     SERVICE_IDENTITY_SCHEMA, ServiceIdentity, StageReceipt, TrustedCorrelation,
     TrustedOrigin, UnavailableGen4Peers, canonical_digest, canonical_file_bytes,
     load_service_identity, make_ready_record, payload_manifest, sha256,
@@ -89,7 +89,24 @@ class FakePeers:
         self.note_acks = 0
         self.stage_admission: bytes | None = None
         self.provider_generation = 1
+        self.invocation_sequence = 0
+        self.omit_correlation_evidence = False
+        self.omit_ahc_evidence = False
+        self.omit_moh_evidence = False
         self.last_correlation: TrustedCorrelation | None = None
+
+    def _evidence(self, tool_id: str, operation: str) -> InvocationEvidence:
+        self.invocation_sequence += 1
+        generation = self.provider_generation
+        return InvocationEvidence(
+            tool_id=tool_id,
+            operation=operation,
+            invocation_id=f"inv_{self.invocation_sequence:032x}",
+            tool_identity=f"{generation:040x}",
+            tool_tree=f"{1000 + generation:040x}",
+            gtg_identity=f"{2000 + generation:040x}",
+            registry_identity=f"{3000 + generation:040x}",
+        )
 
     def _corr(self, request: dict, admission_sha: str, payload_sha: str, service: ServiceIdentity) -> TrustedCorrelation:
         values = {
@@ -99,6 +116,17 @@ class FakePeers:
         }
         values.update(self.request_overrides)
         service_dep = self.service_deployment_override or service.service_deployment_id
+        evidence: tuple[InvocationEvidence, ...]
+        if self.omit_correlation_evidence:
+            evidence = ()
+        else:
+            items = [
+                self._evidence("governed-execution-platform", "correlation_read"),
+                self._evidence("autonomous-handoff-coordinator", "effect_read"),
+            ]
+            if values["chm_handoff_id"] is not None:
+                items.append(self._evidence("common-handoff-manager", "handoff_read"))
+            evidence = tuple(items)
         body = {
             "origin": asdict(self.origin),
             "service_deployment_id": service_dep,
@@ -110,6 +138,7 @@ class FakePeers:
             "gep_admission_sha256": admission_sha,
             "payload_manifest_sha256": payload_sha,
             "chm_handoff_id": values["chm_handoff_id"],
+            "provider_evidence": [asdict(item) for item in evidence],
         }
         return TrustedCorrelation(
             origin=self.origin,
@@ -122,6 +151,7 @@ class FakePeers:
             gep_admission_sha256=admission_sha,
             chm_handoff_id=values["chm_handoff_id"],
             correlation_digest=canonical_digest(body),
+            provider_evidence=evidence,
         )
 
     def establish_correlation(self, request, admission_sha256, payload_manifest_sha256, service_identity):
@@ -152,31 +182,32 @@ class FakePeers:
         self.calls.append("ahc_begin")
         if self.begin_error_once:
             exc, self.begin_error_once = self.begin_error_once, None
-            # Lost response can still mean AHC durably advanced.
             self.ahc_state = "IN_DOUBT"
             raise exc
         self.ahc_state = self.begin_state
-        return AhcObservation(correlation.ahc_effect_reservation_id, correlation.gep_execution_id, self.begin_state, "3" * 64)
+        evidence = None if self.omit_ahc_evidence else self._evidence("autonomous-handoff-coordinator", "begin_effect")
+        return AhcObservation(correlation.ahc_effect_reservation_id, correlation.gep_execution_id, self.begin_state, "3" * 64, evidence)
 
     def ahc_status(self, correlation):
         self.calls.append("ahc_status")
         if self.ahc_status_error:
             raise self.ahc_status_error
-        return AhcObservation(correlation.ahc_effect_reservation_id, correlation.gep_execution_id, self.ahc_state, "4" * 64)
+        evidence = None if self.omit_ahc_evidence else self._evidence("autonomous-handoff-coordinator", "effect_status")
+        return AhcObservation(correlation.ahc_effect_reservation_id, correlation.gep_execution_id, self.ahc_state, "4" * 64, evidence)
 
     def moh_status(self, correlation):
         self.calls.append("moh_status")
         if self.moh_status_error:
             raise self.moh_status_error
         state = self.status_queue.pop(0) if len(self.status_queue) > 1 else self.status_queue[0]
-        return MohObservation(correlation.gep_execution_id, state, "moh-rec-001" if state != "NOT_FOUND" else None, "5" * 64, None)
+        evidence = None if self.omit_moh_evidence else self._evidence("mac-operation-host", "status")
+        return MohObservation(correlation.gep_execution_id, state, "moh-rec-001" if state != "NOT_FOUND" else None, "5" * 64, None, evidence)
 
     def moh_execute(self, correlation):
         self.calls.append("moh_execute")
         self.execute_calls += 1
         if self.execute_error_once:
             exc, self.execute_error_once = self.execute_error_once, None
-            # By default simulate the dangerous lost-response window where MOH received execute.
             if self.ambiguous_execute_started:
                 self.process_starts += 1
                 if self.status_queue == ["NOT_FOUND"]:
@@ -185,28 +216,29 @@ class FakePeers:
         state = self.execute_queue.pop(0) if len(self.execute_queue) > 1 else self.execute_queue[0]
         if state not in {"REJECTED_PRECONDITION", "REJECTED_DUPLICATE_MISMATCH", "NOT_FOUND", "ADMITTED", "IN_DOUBT"}:
             self.process_starts += 1
-        return MohObservation(correlation.gep_execution_id, state, "moh-rec-001", "6" * 64, {"ok": state == "SUCCEEDED"} if state in {"SUCCEEDED", "FAILED"} else None)
+        evidence = None if self.omit_moh_evidence else self._evidence("mac-operation-host", "execute")
+        return MohObservation(correlation.gep_execution_id, state, "moh-rec-001", "6" * 64, {"ok": state == "SUCCEEDED"} if state in {"SUCCEEDED", "FAILED"} else None, evidence)
 
     def ahc_note_in_doubt(self, correlation, moh):
         self.calls.append("ahc_note_in_doubt")
         if self.note_in_doubt_error:
             raise self.note_in_doubt_error
         self.note_acks += 1
-        return Ack(True, "7" * 64)
+        return Ack(True, "7" * 64, self._evidence("autonomous-handoff-coordinator", "note_moh_in_doubt"))
 
     def ahc_accept_terminal(self, correlation, terminal_digest, result_ref, result_sha256):
         self.calls.append("ahc_terminal")
         if self.ahc_terminal_error:
             raise self.ahc_terminal_error
         self.terminal_acks += 1
-        return Ack(True, "8" * 64)
+        return Ack(True, "8" * 64, self._evidence("autonomous-handoff-coordinator", "accept_terminal_effect"))
 
     def chm_publish_terminal(self, correlation, result_ref, result_sha256):
         self.calls.append("chm_terminal")
         if self.chm_error:
             raise self.chm_error
         self.chm_acks += 1
-        return Ack(True, "9" * 64)
+        return Ack(True, "9" * 64, self._evidence("common-handoff-manager", "publish_terminal_result"))
 
 
 class Gen4Tests(unittest.TestCase):
@@ -234,6 +266,22 @@ class Gen4Tests(unittest.TestCase):
         self.assertLess(self.peers.calls.index("ahc_terminal"), self.peers.calls.index("chm_terminal"))
         self.assertEqual(self.peers.process_starts, 1)
         self.assertEqual(self.peers.stage_admission, b"signed-admission-v1")
+        providers = {item["tool_id"] for item in s["trusted_correlation"]["provider_evidence"]}
+        self.assertEqual(providers, {"governed-execution-platform", "autonomous-handoff-coordinator", "common-handoff-manager"})
+        result = json.loads((self.transport / "RunsV2/dger-001/result.json").read_text())
+        self.assertEqual(result["moh_invocation_evidence"]["tool_id"], "mac-operation-host")
+
+    def test_missing_correlation_provider_evidence_fails_closed(self):
+        self.peers.omit_correlation_evidence = True
+        self.relay.process_one(package(self.transport))
+        self.assertEqual(self.peers.execute_calls, 0)
+        self.assertEqual(self.state_record()["phase"], "INGRESS_FROZEN")
+
+    def test_missing_ahc_or_moh_provider_evidence_fails_before_effect_progress(self):
+        self.peers.omit_ahc_evidence = True
+        self.relay.process_one(package(self.transport))
+        self.assertEqual(self.peers.execute_calls, 0)
+        self.assertEqual(self.state_record()["phase"], "PRE_AHC_EXECUTE_WAL")
 
     def test_unavailable_peer_contract_fails_closed_without_execute(self):
         relay = Gen4Relay(self.transport, self.state, service_identity=self.service, peers=UnavailableGen4Peers())
@@ -279,7 +327,6 @@ class Gen4Tests(unittest.TestCase):
 
     def test_package_replayed_through_another_dger_deployment_fails_closed(self):
         p = package(self.transport)
-        # Authenticated peer truth says this effect was delegated to DGER deployment A.
         peers_b = FakePeers(); peers_b.service_deployment_override = "dger-deployment-A"
         service_b = service_identity("dger-deployment-B")
         relay_b = Gen4Relay(self.transport, self.state, service_identity=service_b, peers=peers_b)
@@ -335,12 +382,10 @@ class Gen4Tests(unittest.TestCase):
 
     def test_changed_byte_duplicate_rejected(self):
         p = package(self.transport)
-        # Freeze/accept only, stop before peer work.
         relay = Gen4Relay(self.transport, self.state, service_identity=self.service, peers=self.peers, fault=lambda n: (_ for _ in ()).throw(Crash()) if n == "after_accept_state" else None)
         with self.assertRaises(Crash): relay.process_one(p)
         (p / "admission.bin").write_bytes(b"changed")
         req = (p / "request.json").read_bytes(); (p / "READY.json").write_bytes(canonical_file_bytes(make_ready_record(req, b"changed", p/"payload", "dger-001")))
-        # Existing frozen bytes remain authoritative; package changed bytes cannot replace them.
         relay2 = Gen4Relay(self.transport, self.state, service_identity=self.service, peers=self.peers)
         relay2.process_one(p)
         self.assertEqual(self.peers.process_starts, 0)
@@ -390,7 +435,6 @@ class Gen4Tests(unittest.TestCase):
         self.assertEqual(self.peers.process_starts, 1)
 
     def test_crash_after_moh_execute_wal_is_status_first_and_at_most_one_start(self):
-        # Crash is before peer execute: restart first reconciles status; a safe NOT_FOUND proof then executes once.
         self._crash_resume("after_moh_execute_wal")
         self.assertEqual(self.peers.process_starts, 1)
         self.assertGreaterEqual(self.peers.calls.count("moh_status"), 2)
@@ -407,8 +451,8 @@ class Gen4Tests(unittest.TestCase):
         self.relay.process_one(package(self.transport))
         self.assertEqual(self.peers.process_starts, 1)
         self.assertEqual(self.peers.execute_calls, 1)
-        self.relay.scan_once()  # RUNNING
-        self.relay.scan_once()  # terminal
+        self.relay.scan_once()
+        self.relay.scan_once()
         self.assertEqual(self.state_record()["phase"], "DONE")
         self.assertEqual(self.peers.process_starts, 1)
         self.assertEqual(self.peers.execute_calls, 1)
@@ -434,6 +478,7 @@ class Gen4Tests(unittest.TestCase):
         self.assertEqual(self.state_record()["phase"], "MOH_IN_DOUBT")
         self.assertEqual(self.peers.execute_calls, execute_calls)
         self.assertTrue(self.state_record()["moh_in_doubt_ever"])
+        self.assertEqual(self.state_record()["ahc_in_doubt_report_ack"]["invocation_evidence"]["tool_id"], "autonomous-handoff-coordinator")
 
     def test_ahc_unavailable_after_moh_terminal_never_reexecutes(self):
         self.peers.ahc_terminal_error = TimeoutError("AHC down")
@@ -476,10 +521,24 @@ class Gen4Tests(unittest.TestCase):
         self.assertEqual(self.peers.process_starts, starts)
 
     def test_provider_advancement_alone_does_not_reexecute(self):
+        self.peers.ahc_terminal_error = TimeoutError("AHC provider unavailable")
         self.relay.process_one(package(self.transport))
+        self.assertEqual(self.state_record()["phase"], "AHC_TERMINAL_PENDING")
         starts = self.peers.process_starts
+        self.peers.ahc_terminal_error = None
         self.peers.provider_generation = 2
         self.relay.scan_once()
+        s = self.state_record()
+        self.assertEqual(s["phase"], "DONE")
+        self.assertEqual(self.peers.process_starts, starts)
+        self.assertEqual(s["ahc_terminal_ack"]["invocation_evidence"]["tool_identity"], f"{2:040x}")
+
+    def test_incompatible_provider_rejection_never_reexecutes(self):
+        self.peers.ahc_terminal_error = DgerGen4Error("PROVIDER_NOT_CURRENT_COMPATIBLE")
+        self.relay.process_one(package(self.transport))
+        starts = self.peers.process_starts
+        self.relay.scan_once()
+        self.assertEqual(self.state_record()["phase"], "AHC_TERMINAL_PENDING")
         self.assertEqual(self.peers.process_starts, starts)
 
     def test_peer_rejection_models_forged_changed_or_wrong_key_admission_without_start(self):
@@ -513,6 +572,7 @@ class LegacyGuardTests(unittest.TestCase):
     def test_gen3_runtime_contains_secure_activation_guard(self):
         text = (ROOT / "src/dger/relay_runtime.py").read_text("utf-8")
         self.assertIn("assert_legacy_allowed(state_root)", text)
+
     def test_service_identity_file_must_be_owner_only(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td)/"service.json"
