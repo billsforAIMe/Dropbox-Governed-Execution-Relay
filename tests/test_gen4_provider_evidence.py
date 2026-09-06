@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dger.gen4 import AhcObservation, Gen4Relay, InvocationEvidence, MohObservation, StageReceipt, TrustedCorrelation, canonical_digest
+from dger.gen4 import Gen4Relay, InvocationEvidence, canonical_digest
 from test_gen4 import FakePeers, package, service_identity
 
 
@@ -45,6 +45,14 @@ class WrongMohStatusOperationPeers(FakePeers):
         evidence = obs.invocation_evidence
         assert isinstance(evidence, InvocationEvidence)
         return replace(obs, invocation_evidence=replace(evidence, operation="execute"))
+
+
+class WrongMohExecuteOperationPeers(FakePeers):
+    def moh_execute(self, correlation):
+        obs = super().moh_execute(correlation)
+        evidence = obs.invocation_evidence
+        assert isinstance(evidence, InvocationEvidence)
+        return replace(obs, invocation_evidence=replace(evidence, operation="status"))
 
 
 class WrongTerminalAckOperationPeers(FakePeers):
@@ -95,6 +103,17 @@ class ProviderOperationEvidenceTests(unittest.TestCase):
         try:
             self.assertEqual(state["phase"], "AHC_IN_DOUBT")
             self.assertEqual(peers.execute_calls, 0)
+        finally:
+            td.cleanup()
+
+    def test_moh_execute_same_tool_wrong_operation_never_becomes_terminal_truth(self):
+        peers = WrongMohExecuteOperationPeers()
+        td, _root, relay, state = self._run(peers)
+        try:
+            self.assertEqual(state["phase"], "MOH_RECONCILE")
+            starts = peers.process_starts
+            relay.scan_once()
+            self.assertEqual(peers.process_starts, starts)
         finally:
             td.cleanup()
 
