@@ -82,9 +82,11 @@ A crash after DGER's local pre-AHC WAL but before AHC begin resumes at AHC begin
 
 DGER preserves Generation 3's write-ahead/status-first recovery and MOH's stronger durable process-start truth.
 
-After the immediate MOH-call WAL, any crash, transport exception, missing/invalid response, or process restart resumes through MOH `status`. A fresh exact `NOT_FOUND` or `ADMITTED` status is the only normalized proof that can permit another same-GEP-execution `execute` attempt after ambiguity. `RUNNING` or other nonterminal process truth remains status-only. Terminal truth is persisted. `IN_DOUBT` sets a monotonic `moh_in_doubt_ever` latch that permanently removes DGER execute permission for that execution.
+After the immediate MOH-call WAL, any crash, transport exception, missing response, or process restart resumes through MOH `status`. For an ordinary transport/lost-response ambiguity, a fresh exact `NOT_FOUND` or `ADMITTED` status is the only normalized proof that can permit another same-GEP-execution `execute` attempt. `RUNNING` or other nonterminal process truth remains status-only. Terminal truth is persisted. An exact MOH `IN_DOUBT` observation sets the monotonic no-execute latch and permanently removes DGER execute permission for that execution.
 
-`IN_DOUBT` is reported idempotently to AHC. If AHC is unavailable, that report remains durably pending; retries cannot invoke MOH execute.
+A response that arrives **after the MOH execute call has left DGER** but fails exact correlation, provider-identity, or operation-evidence validation is treated more conservatively than an ordinary missing response. DGER records `moh_execute_response_invalid=true`, sets the same monotonic no-execute latch with source `INVALID_EXECUTE_RESPONSE`, and returns only to status reconciliation. Later valid MOH terminal status may close the execution, but even a later `NOT_FOUND` or `ADMITTED` observation cannot restore execute permission. This prevents an invalid or cross-operation execute response from being converted into a second process-start attempt.
+
+When the no-execute latch came from an exact MOH `IN_DOUBT` observation, that observation is reported idempotently to AHC. If AHC is unavailable, that report remains durably pending; retries cannot invoke MOH execute. DGER does not fabricate an AHC `IN_DOUBT` report from a response-validation failure for which it lacks a valid MOH observation.
 
 Transport retry, READY replay, Dropbox duplication/deletion, CHM state, CHM result absence, lease expiry, task wake, service restart, or peer provider advancement never independently authorizes execution.
 
