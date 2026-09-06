@@ -4,6 +4,7 @@ from dataclasses import replace
 import unittest
 
 from dger.gen4 import DgerGen4Error
+import dger.gen4_delegation as delegation
 from dger.gen4_delegation import (
     DELEGATED_AUTHORIZATION_RULE,
     DELEGATED_SERVICE_CONTEXT_ISSUER,
@@ -11,7 +12,6 @@ from dger.gen4_delegation import (
     EXECUTION_RELAY_ROLE,
     delegated_service_context_to_dict,
     parse_delegated_service_context,
-    require_delegated_operation_claim,
     require_protected_service_match,
 )
 from test_gen4 import service_identity
@@ -53,6 +53,18 @@ class DelegatedServiceContextTests(unittest.TestCase):
         self.assertEqual(context.delegation_invocation_id, "gtg_del_" + "3" * 64)
         self.assertEqual(delegated_service_context_to_dict(context), raw)
         self.assertEqual(DELEGATED_AUTHORIZATION_RULE, "ORIGIN_INTERSECT_SERVICE_INTERSECT_TARGET_POLICY")
+
+    def test_parsed_value_exposes_no_local_authorization_decision(self):
+        context = parse_delegated_service_context(valid_context())
+        self.assertEqual(
+            context.authorized_operations,
+            (
+                "tool:common-handoff-manager:handoff_attach_result",
+                "tool:common-handoff-manager:handoff_get",
+            ),
+        )
+        self.assertFalse(hasattr(delegation, "authorize"))
+        self.assertFalse(hasattr(delegation, "require_delegated_operation_claim"))
 
     def test_context_is_bound_to_protected_service_not_dropbox_identity(self):
         context = parse_delegated_service_context(valid_context())
@@ -97,36 +109,6 @@ class DelegatedServiceContextTests(unittest.TestCase):
                 raw = valid_context(); raw[field] = bad
                 with self.assertRaises(DgerGen4Error):
                     parse_delegated_service_context(raw)
-
-    def test_operation_claim_requires_both_exact_operation_and_capability(self):
-        context = parse_delegated_service_context(valid_context())
-        require_delegated_operation_claim(
-            context,
-            tool_id="common-handoff-manager",
-            operation="handoff_get",
-            authority_class="READ",
-        )
-        require_delegated_operation_claim(
-            context,
-            tool_id="common-handoff-manager",
-            operation="handoff_attach_result",
-            authority_class="EFFECT",
-        )
-        with self.assertRaisesRegex(DgerGen4Error, "OPERATION_DENIED"):
-            require_delegated_operation_claim(
-                context,
-                tool_id="common-handoff-manager",
-                operation="handoff_resolve",
-                authority_class="EFFECT",
-            )
-        read_only = replace(context, authorized_capability_classes=("READ",))
-        with self.assertRaisesRegex(DgerGen4Error, "OPERATION_DENIED"):
-            require_delegated_operation_claim(
-                read_only,
-                tool_id="common-handoff-manager",
-                operation="handoff_attach_result",
-                authority_class="EFFECT",
-            )
 
 
 if __name__ == "__main__":
