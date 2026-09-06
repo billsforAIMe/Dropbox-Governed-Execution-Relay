@@ -9,7 +9,7 @@ from .gen4_delegation import (
     DELEGATED_AUTHORIZATION_RULE, DELEGATED_SERVICE_CONTEXT_ISSUER,
     DELEGATED_SERVICE_CONTEXT_SCHEMA, EXECUTION_RELAY_ROLE, DelegatedServiceContext,
     delegated_service_context_to_dict, parse_delegated_service_context,
-    require_delegated_operation_claim, require_protected_service_match,
+    require_protected_service_match,
 )
 from .gen4_state import Gen4StateMixin
 from .gen4_effect import Gen4EffectMixin
@@ -28,5 +28,5 @@ __all__ = [
     "StageReceipt", "TrustedCorrelation", "TrustedOrigin", "UnavailableGen4Peers", "canonical_bytes",
     "canonical_digest", "canonical_file_bytes", "delegated_service_context_to_dict",
     "load_service_identity", "make_ready_record", "parse_delegated_service_context", "payload_manifest",
-    "require_delegated_operation_claim", "require_protected_service_match", "sha256",
+    "require_protected_service_match", "sha256",
 ]
