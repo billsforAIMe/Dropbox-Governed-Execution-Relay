@@ -19,11 +19,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Compile changed Python surfaces
+      - name: Compile Python surfaces
         run: python -m compileall -q src tests tools
-      - name: Gen4 adversarial tests
+      - name: Portable Gen3 + Gen4 assurance and release validation
         env:
-          PYTHONPATH: src
-        run: python -m unittest tests.test_gen4 -v
-      - name: Effect-surface inventory validation
-        run: python tools/validate_gen4_effect_surface_inventory.py
+          PYTHONPATH: src:tests
+        run: python tests/run_gen4_assurance.py
