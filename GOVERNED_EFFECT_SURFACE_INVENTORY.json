@@ -74,7 +74,7 @@
       "symbols": ["Gen4Peers.moh_execute", "Gen4EffectMixin._execute_moh"],
       "class": "GEN4_MOH_EXECUTION_EFFECT",
       "post_gen4_status": "SOURCE_READY_PREACTIVATION",
-      "mechanical_guard": "PRE_AHC_EXECUTE_WAL + authenticated AHC IN_DOUBT + MOH status proof + MOH execute-call WAL + exact invocation-time MOH provider evidence bound to operation"
+      "mechanical_guard": "PRE_AHC_EXECUTE_WAL + authenticated AHC IN_DOUBT + MOH status proof + MOH execute-call WAL + exact invocation-time MOH provider evidence bound to operation + INVALID_EXECUTE_RESPONSE monotonic no-repeat latch"
     },
     {
       "id": "gen4-ahc-effect-port",
