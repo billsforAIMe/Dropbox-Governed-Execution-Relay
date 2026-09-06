@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - builder/dger-gen4-fixed-dispatcher
+      - builder/gen4-delegated-context-ci
   pull_request:
     branches:
       - main
