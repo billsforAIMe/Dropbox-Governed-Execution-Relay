@@ -26,7 +26,9 @@ Do not persist the current Software Governance release commit/tree/generation in
 
 - Immutable common-Tool binding-set locator: `NONE`
 
-`NONE` grants no Tool capability. Generation 3 consumes MOH, CHM, consumer Tools, and GTG only through runtime exact identities verified through the current governed Registry/GTG semantic path and frozen into per-execution DGER State; those runtime bindings do not make the Registry or transport software authority.
+`NONE` grants no Tool capability. Generation 4 preserves DGER as a substrate relay and does not create a local authority substitute for peer-owned trust contracts. Pre-activation Gen4 production peer operations fail closed until exact delivered GTG/GTC, AHC, GEP, CHM, and MOH contracts are current-compatible and callable. When those peer contracts are later bound for activation, DGER consumes them only through authenticated semantic paths and records exact invocation-time provider identity evidence in per-execution DGER State. Those runtime observations do not make the Registry, Dropbox transport, or DGER itself the software/lifecycle/admission authority of a peer Tool.
+
+The Generation-3 installed runtime may remain selected while Generation-4 source is published, but only under the explicit runtime-compatibility declaration in the authoritative DGER governed-release manifest and only before protected Gen4 activation State exists. Gen4 activation is a separate governed deployment/cutover act.
 
 ## Tool-local governance paths
 
