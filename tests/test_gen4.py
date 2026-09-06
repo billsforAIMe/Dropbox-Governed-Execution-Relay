@@ -63,7 +63,7 @@ class FakePeers:
     def __init__(self) -> None:
         self.origin = TrustedOrigin(
             tenant_id="tenant-A", principal_id="principal-A", deployment_id="builder-deployment-A",
-            fleet_epoch=7, originating_invocation_id="inv-origin-001", context_digest="1" * 64,
+            fleet_epoch=7, originating_invocation_id="gtg_inv_" + "a" * 64, context_digest="sha256:" + "1" * 64,
         )
         self.service_deployment_override: str | None = None
         self.request_overrides: dict[str, str | None] = {}
@@ -101,7 +101,7 @@ class FakePeers:
         return InvocationEvidence(
             tool_id=tool_id,
             operation=operation,
-            invocation_id=f"inv_{self.invocation_sequence:032x}",
+            invocation_id=f"gtg_inv_{self.invocation_sequence:064x}",
             tool_identity=f"{generation:040x}",
             tool_tree=f"{1000 + generation:040x}",
             gtg_identity=f"{2000 + generation:040x}",
