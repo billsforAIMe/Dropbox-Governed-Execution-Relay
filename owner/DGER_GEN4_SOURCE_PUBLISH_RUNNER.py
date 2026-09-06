@@ -67,6 +67,57 @@ def load_carrier():
     return module
 
 
+def enumerate_deploy_keys(module, gh: str) -> list[dict]:
+    keys: list[dict] = []
+    for page in range(1, 11):
+        obj = module._runner_original_gh_json(
+            gh, f"repos/{module.REPO}/keys?per_page=100&page={page}"
+        )
+        if not isinstance(obj, list):
+            raise RuntimeError("DEPLOY_KEY_LIST_NOT_ARRAY")
+        for item in obj:
+            if not isinstance(item, dict):
+                raise RuntimeError("DEPLOY_KEY_ITEM_NOT_OBJECT")
+            keys.append(item)
+        if len(obj) < 100:
+            return keys
+    raise RuntimeError("DEPLOY_KEY_ENUMERATION_UNBOUNDED")
+
+
+def require_zero_write_deploy_keys(keys: list[dict]) -> None:
+    standing = [
+        item for item in keys
+        if item.get("read_only") is False
+    ]
+    if standing:
+        ids = [str(item.get("id", "UNKNOWN")) for item in standing]
+        raise RuntimeError("STANDING_WRITE_DEPLOY_KEY:" + ",".join(ids))
+
+
+def install_deploy_key_guard(module) -> None:
+    original = module.gh_json
+    module._runner_original_gh_json = original
+
+    def guarded(gh: str, path: str, *extra: str):
+        is_create = (
+            path == f"repos/{module.REPO}/keys"
+            and "-X" in extra
+            and "POST" in extra
+        )
+        if is_create:
+            require_zero_write_deploy_keys(enumerate_deploy_keys(module, gh))
+            print("preexisting_write_deploy_keys=ZERO")
+        return original(gh, path, *extra)
+
+    module.gh_json = guarded
+
+
+def verify_post_run_key_hygiene(module) -> None:
+    gh = governed_find_exe("/opt/homebrew/bin/gh", "/usr/local/bin/gh", "gh")
+    require_zero_write_deploy_keys(enumerate_deploy_keys(module, gh))
+    print("postrun_write_deploy_keys=ZERO")
+
+
 def self_test() -> None:
     resolved = governed_find_exe("/bin/sh")
     if not Path(resolved).is_file() or not os.access(resolved, os.X_OK):
@@ -74,6 +125,14 @@ def self_test() -> None:
     gs = governed_find_exe("/usr/local/bin/gitstorage", "/opt/homebrew/bin/gitstorage", "gitstorage")
     if gs != str(GITSTORAGE_RUNTIME.resolve(strict=True)):
         raise RuntimeError("GITSTORAGE_RUNTIME_RESOLUTION_SELFTEST_FAILED")
+    require_zero_write_deploy_keys([{"id": 1, "read_only": True}])
+    try:
+        require_zero_write_deploy_keys([{"id": 2, "read_only": False}])
+    except RuntimeError as exc:
+        if not str(exc).startswith("STANDING_WRITE_DEPLOY_KEY:"):
+            raise
+    else:
+        raise RuntimeError("DEPLOY_KEY_GUARD_SELFTEST_FAIL_OPEN")
     module = load_carrier()
     module.find_exe = governed_find_exe
     saved = sys.argv[:]
@@ -93,12 +152,19 @@ def main() -> None:
         raise RuntimeError("UNEXPECTED_ARGUMENTS")
     module = load_carrier()
     module.find_exe = governed_find_exe
+    install_deploy_key_guard(module)
     saved = sys.argv[:]
+    caught: BaseException | None = None
     try:
         sys.argv = [str(CARRIER)]
         module.main()
+    except BaseException as exc:
+        caught = exc
     finally:
         sys.argv = saved
+        verify_post_run_key_hygiene(module)
+    if caught is not None:
+        raise caught
 
 
 if __name__ == "__main__":
