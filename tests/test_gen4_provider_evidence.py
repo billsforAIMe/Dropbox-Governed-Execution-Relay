@@ -110,11 +110,13 @@ class ProviderOperationEvidenceTests(unittest.TestCase):
         peers = WrongMohExecuteOperationPeers()
         td, root, relay, state = self._run(peers)
         try:
-            self.assertEqual(state["phase"], "MOH_RECONCILE")
+            self.assertEqual(state["phase"], "MOH_IN_DOUBT")
             self.assertTrue(state["moh_in_doubt_ever"])
             self.assertEqual(state["moh_in_doubt_source"], "INVALID_EXECUTE_RESPONSE")
             self.assertTrue(state["moh_execute_response_invalid"])
+            self.assertGreaterEqual(state["moh_status_calls"], 2)
             starts = peers.process_starts
+            self.assertEqual(peers.execute_calls, 1)
             relay.scan_once()
             state2 = json.loads((root / "state/gen4/executions/dger-001.json").read_text())
             self.assertEqual(state2["phase"], "MOH_IN_DOUBT")
