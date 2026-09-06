@@ -1,54 +1,83 @@
-# Dropbox Governed Execution Relay — Generation 3
+# Dropbox Governed Execution Relay — Generation 4 source release
 
-DGER is the governed transport/reconciliation relay between immutable cloud execution requests and Mac Operation Host (MOH), with durable completion publication through Common Handoff Manager (CHM).
+DGER is the governed immutable-transport and reconciliation relay for asynchronous Mac execution. Generation 4 composes DGER with the fixed-dispatcher architecture while keeping execution admission, lifecycle entitlement, host process truth, handoff history, and transport authority separate.
 
-Generation 3 removes Prototype R0's singleton assumptions. Each accepted `execution_id` owns independent immutable request, payload, acceptance-time provider observations, MOH stage/reconciliation state, invocation identity evidence, result evidence, and CHM publication state. The installed service may serialize work; accepted executions are not globally exhausted after any fixed number of calls.
+Generation-4 **source publication and secure runtime activation are separate**. The exact delivered Generation-3 runtime may remain installed before cutover. Production Gen4 peer operations remain fail-closed until the exact current-compatible GTG/GTC, AHC, GEP, CHM, and MOH contracts are delivered and bound.
 
 ## Authority and boundary model
 
-- **Tool software authority:** DGER's authoritative GitHub `refs/heads/main`.
-- **MOH:** durable host execution truth and the no-blind-repeat invariant.
-- **DGER:** immutable transport, relay state, reconciliation, and bounded identity/evidence recording.
-- **CHM:** logical handoff/result/history truth.
-- **GTG/GTC:** semantic provider discovery, callability/currentness checks, invocation-time route selection, exact Tool dispatch, and identity attestation.
-- **Dropbox:** transport only; never software authority or execution truth.
+- **DGER Git:** software authority for DGER source only.
+- **GTG/GTC:** authenticated delegated service context, operation authorization, provider currentness/compatibility, exact dispatch, and invocation-time identity attestation.
+- **AHC:** consequential-effect lifecycle/entitlement authority and causal Builder wake authority.
+- **GEP:** execution-admission authority and owner of the signed MOH admission/execution correlation.
+- **MOH:** sole Mac process-start and terminal host-truth authority; preserves `NO BLIND REPEAT`.
+- **CHM:** optional tenant-bound correlation/result/history only; never execution entitlement.
+- **DGER:** immutable transport intake, protected reconciliation State, AHC-before-MOH ordering, bounded terminal publication, and exact provider-evidence retention.
+- **Dropbox:** transport only; never software, trust, lifecycle, or execution authority.
 
-DGER never accepts caller-selected shell, argv, cwd, interpreter, environment, network mechanics, or retry policy. It preserves the upstream MOH envelope bytes and payload digest and invokes only the semantic operations already registered for MOH/CHM.
+The immediate service actor is `EXECUTION_RELAY`. Origin tenant/principal/deployment/fleet epoch is obtained only through authenticated peer truth. Caller/Dropbox material cannot establish identity, role, entitlement, execution profile, shell, executable, interpreter, argv, cwd, environment, PATH, trust key, handler, result channel, or retry policy.
 
-## Provider identity and current callability
+## Immutable V2 ingress
 
-New executions are accepted for host work only when GTG Doctor reports the required current semantic operations as callable and returns exact authoritative/delivered bindings for:
+The transport-neutral V2 package contains:
 
-- `mac-operation-host`: `execute`, `status`;
-- `common-handoff-manager`: `handoff_get`, `handoff_attach_result`, `handoff_resolve`;
-- the consumer Tool/operation named by the immutable MOH envelope.
+```text
+<dger_request_id>/
+  request.json
+  admission.bin
+  payload/**
+  READY.json
+```
 
-The consumer Tool is special: the immutable MOH envelope already names its exact commit/tree/repository/selector, so its Doctor binding must match that envelope at acceptance.
+`request.json` carries only DGER/GEP/AHC/optional-CHM correlation identifiers. `admission.bin` is the exact opaque GEP-signed MOH admission; DGER preserves it unchanged. `READY.json` binds exact request/admission bytes and deterministic payload closure. `tools/build_gen4_ingress.py` seals this package but grants no execution authority.
 
-MOH and CHM Doctor bindings are acceptance-time observations, not permanent dispatch locks. GTG may legitimately select a later current-compatible MOH or CHM release for a later semantic invocation. For each successful `invoke_tool`, DGER requires GTG's exact identity attestation and invocation evidence, and records the Tool identity actually selected for that call. Current GTG dispatch materializes and executes the exact `delivered_tool_identity` selected by that invocation; DGER therefore does not represent a stale earlier Doctor observation as the actual executor.
+Once READY is accepted, DGER freezes exact material into private State with positive readback. Recovery no longer depends on continued Dropbox package presence. Same-ID changed-byte reuse or conflicting GEP execution intent fails closed.
 
-Before any MOH-visible stage exists, DGER calls CHM `handoff_get` and requires the supplied logical handoff to be `STARTED` with no prior result. That successful read must carry exact GTG identity attestation. CHM derives project authority from DGER's authenticated GTG transport binding; ingress cannot select a project or credential.
+## AHC-before-MOH execution ordering
 
-Every MOH `execute` is preceded by durable write-ahead reconciliation State. If the GTG transport/result is ambiguous, or a purported successful result lacks exact identity attestation, DGER does not treat the semantic observation as trusted completion; it remains in reconciliation. Once MOH has ever reported `IN_DOUBT`, the monotonic latch permanently bars any later DGER `execute`, including after intervening transport ambiguity or a later `NOT_FOUND`.
+For every Generation-4 execution DGER enforces:
 
-This model deliberately does not claim that an earlier Doctor observation is atomically pinned to a later invocation. The authoritative identity for an invocation is GTG's invocation-time selected and attested exact Tool release. A future GTG expected-binding compare-and-invoke guard can provide stricter caller-side preselection, but it is not required for Generation-3 correctness under this narrower contract.
+```text
+private ingress freeze
+→ authenticated trusted correlation
+→ exact MOH staging
+→ PRE_AHC_EXECUTE_WAL
+→ AHC begin
+→ exact AHC IN_DOUBT
+→ MOH status proof
+→ MOH execute-call WAL
+→ MOH execute/status reconciliation
+→ durable MOH terminal truth
+→ AHC terminal acceptance
+→ optional CHM result/history publication
+```
 
-Once accepted, reconciliation is State-driven: removal of the external Dropbox ingress package cannot strand a running/ambiguous MOH execution or CHM-only publication. A retained/replayed ingress package is still checked against the immutable accepted intent.
+A lost AHC-begin response is reconciled through AHC status. Any ambiguous MOH execute response restarts through MOH status, not another blind execute. Only a fresh exact `NOT_FOUND`/`ADMITTED` observation can permit a same-GEP-execution retry. Once MOH reports `IN_DOUBT`, DGER permanently removes execute permission for that execution and retries only AHC in-doubt reporting.
 
-As of the Generation-3 delivery work, authoritative CHM Generation 10 exposes the required stable logical lifecycle, and authoritative GTG Generation 18 preserves the exact identity-attestation semantics introduced in Generation 16. Production activation must still verify those capabilities are actually deployed and callable in the target environment; DGER fails closed if required operations or successful-call identity attestation are unavailable.
+AHC or CHM unavailability after MOH terminal truth cannot cause re-execution.
 
-## Protocol
+## Invocation-time provider identity
 
-See `docs/PROTOCOL_V1.md`. Prototype R0 remains in `src/dger/relay.py` for historical regression coverage; the installed entry point uses `src/dger/relay_v1.py`.
+Every successful Generation-4 semantic peer call must carry exact GTG invocation-time evidence containing the invocation ID, Tool commit/tree, GTG identity, and Registry identity. DGER retains this evidence in trusted correlation, AHC/MOH observations, AHC/CHM acknowledgements, and the bounded terminal result where applicable.
 
-## Runtime binding
+Provider advancement alone never authorizes host execution. The exact peer adapter must reject a provider that is not current-compatible; DGER records whichever exact compatible provider actually serviced each successful call.
 
-The portable relay core contains no Owner checkout paths. The installed Mac launcher supplies:
+## Compatibility and anti-bypass
 
-- DGER State root;
-- Dropbox transport root;
-- MOH home;
-- GTG endpoint and private bearer-token file;
-- governed PyRunway.
+Generation-3 production remains valid only before protected Gen4 activation. Once `gen4/ACTIVATED.json` exists in installed DGER State, Generation-3 runtime construction fails closed; malformed/unsafe marker bytes also fail closed.
 
-The GTG endpoint/token/MOH binding is deployment state, not caller input and not software identity. The service remains Mac-bound in operation while the relay core and crash/concurrency protocol are portable for cloud falsification.
+The older Prototype R0 direct-GEP process-start module is permanently retired in Generation-4 source and exposes no execution-capable compatibility shim.
+
+`GOVERNED_EFFECT_SURFACE_INVENTORY.json` and `tools/validate_gen4_effect_surface_inventory.py` inventory the process-start/effect/admin/recovery/compatibility surfaces and detect unclassified DGER Python execution primitives.
+
+## Current pre-activation peer boundary
+
+`Gen4Peers` is an internal normalization/test port, not a caller authority surface. `UnavailableGen4Peers` is the source-published production placeholder and fails all Gen4 peer operations with `GEN4_PEER_CONTRACTS_UNAVAILABLE` until the exact delivered peer tuple exists.
+
+DGER does not invent local substitutes for pending GTG actor-context, AHC effect, GEP signed-admission, CHM tenant-correlation, or MOH signed-admission contracts.
+
+## Protocol and deployment
+
+See `docs/PROTOCOL_V2.md` for the Generation-4 source contract and `docs/PROTOCOL_V1.md` for the delivered Generation-3 compatibility protocol.
+
+Actual Gen4 activation requires protected DGER service credential/identity provisioning, exact peer currentness/callability, Mac deployment qualification, cross-namespace/service replay falsification, crash/recovery qualification, Registry discovery verification, rollback evidence, and protected activation-State creation. Until then, the existing Generation-3 installed runtime may remain selected under the explicit runtime compatibility declaration in `GOVERNED_RELEASE.json`.
