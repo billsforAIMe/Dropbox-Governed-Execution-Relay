@@ -15,7 +15,8 @@ AHC_TOOL_ID = "autonomous-handoff-coordinator"
 MOH_TOOL_ID = "mac-operation-host"
 CHM_TOOL_ID = "common-handoff-manager"
 _HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
-_INVOCATION_ID_RE = re.compile(r"^inv_[0-9a-f]{32}$")
+_GTG_INVOCATION_ID_RE = re.compile(r"^gtg_inv_[0-9a-f]{64}$")
+_GTG_CONTEXT_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -178,7 +179,7 @@ def _validate_invocation_evidence(
         raise DgerGen4Error("GTG_INVOCATION_TOOL_MISMATCH")
     if expected_operation is not None and evidence.operation != expected_operation:
         raise DgerGen4Error("GTG_INVOCATION_OPERATION_MISMATCH")
-    if _INVOCATION_ID_RE.fullmatch(evidence.invocation_id) is None:
+    if _GTG_INVOCATION_ID_RE.fullmatch(evidence.invocation_id) is None:
         raise DgerGen4Error("GTG_INVOCATION_ID_INVALID")
     for key in ("tool_identity", "tool_tree", "gtg_identity", "registry_identity"):
         if _HEX40_RE.fullmatch(getattr(evidence, key)) is None:
@@ -272,14 +273,18 @@ def _validate_correlation(c: TrustedCorrelation, request: dict[str, Any], admiss
     # from transport. DGER only proves that routing/correlation hints match that truth.
     for value, code in (
         (c.origin.tenant_id, "TRUSTED_TENANT_INVALID"), (c.origin.principal_id, "TRUSTED_PRINCIPAL_INVALID"),
-        (c.origin.deployment_id, "TRUSTED_ORIGIN_DEPLOYMENT_INVALID"), (c.origin.originating_invocation_id, "TRUSTED_INVOCATION_INVALID"),
+        (c.origin.deployment_id, "TRUSTED_ORIGIN_DEPLOYMENT_INVALID"),
         (c.ahc_execution_claim_id, "TRUSTED_AHC_CLAIM_INVALID"), (c.ahc_effect_reservation_id, "TRUSTED_AHC_EFFECT_INVALID"),
         (c.ahc_work_revision, "TRUSTED_AHC_REVISION_INVALID"), (c.gep_execution_id, "TRUSTED_GEP_EXECUTION_INVALID"),
     ):
         _safe_id(value, code)
+    if _GTG_INVOCATION_ID_RE.fullmatch(c.origin.originating_invocation_id) is None:
+        raise DgerGen4Error("TRUSTED_INVOCATION_INVALID")
     if c.origin.fleet_epoch < 0:
         raise DgerGen4Error("TRUSTED_FLEET_EPOCH_INVALID")
-    for value, code in ((c.origin.context_digest, "TRUSTED_CONTEXT_DIGEST_INVALID"), (c.gep_request_digest, "TRUSTED_GEP_REQUEST_DIGEST_INVALID"), (c.gep_admission_sha256, "TRUSTED_ADMISSION_DIGEST_INVALID"), (c.correlation_digest, "TRUSTED_CORRELATION_DIGEST_INVALID")):
+    if _GTG_CONTEXT_DIGEST_RE.fullmatch(c.origin.context_digest) is None:
+        raise DgerGen4Error("TRUSTED_CONTEXT_DIGEST_INVALID")
+    for value, code in ((c.gep_request_digest, "TRUSTED_GEP_REQUEST_DIGEST_INVALID"), (c.gep_admission_sha256, "TRUSTED_ADMISSION_DIGEST_INVALID"), (c.correlation_digest, "TRUSTED_CORRELATION_DIGEST_INVALID")):
         if HEX64_RE.fullmatch(value) is None:
             raise DgerGen4Error(code)
     if c.service_deployment_id != service.service_deployment_id:
