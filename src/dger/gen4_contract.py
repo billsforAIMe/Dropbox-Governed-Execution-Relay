@@ -73,6 +73,7 @@ class StageReceipt:
     admission_sha256: str
     payload_manifest_sha256: str
     stage_digest: str
+    stage_kind: str = "LOCAL_MATERIALIZATION"
 
 
 @dataclass(frozen=True)
@@ -104,11 +105,21 @@ class Ack:
 class Gen4Peers(Protocol):
     """Internal semantic port. Wire/auth translation belongs to the exact delivered peer adapter.
 
-    Implementations MUST invoke peers under the protected DGER service credential/delegated
-    context. No method accepts identity from Dropbox as authority. Every successful semantic
-    peer call MUST return exact invocation-time GTG provider identity evidence. The production
-    adapter is intentionally unavailable until GTG/GTC #94 and the exact AHC/GEP/CHM/MOH
-    contracts ship; it must enforce delivered peer currentness/compatibility before returning.
+    Implementations MUST invoke semantic peers under the protected DGER service
+    credential/delegated context. No method accepts identity from Dropbox as authority.
+    Every successful semantic peer call MUST return exact invocation-time GTG provider
+    identity evidence bound to the exact normalized operation DGER requested.
+
+    ``stage_moh`` is deliberately different: in this source-ready pre-activation contract it
+    is only local, non-effectful materialization of already authenticated immutable bytes into
+    the MOH staging substrate. Its receipt MUST say ``LOCAL_MATERIALIZATION`` and it MUST NOT
+    perform a semantic peer invocation or start a process. If a delivered peer tuple later
+    requires remote/semantic staging, that adapter contract is changed input and must add exact
+    invocation evidence under change-driven review rather than silently reusing this receipt.
+
+    The production adapter is intentionally unavailable until GTG/GTC #94 and the exact
+    AHC/GEP/CHM/MOH contracts ship; it must enforce delivered peer currentness/compatibility
+    before returning.
     """
 
     def establish_correlation(
@@ -158,12 +169,15 @@ def _validate_invocation_evidence(
     value: InvocationEvidence | dict[str, Any] | None,
     *,
     expected_tool: str | None = None,
+    expected_operation: str | None = None,
 ) -> InvocationEvidence:
     evidence = _invocation_evidence_from_any(value)
     _safe_id(evidence.tool_id, "GTG_INVOCATION_TOOL_INVALID")
     _safe_id(evidence.operation, "GTG_INVOCATION_OPERATION_INVALID")
     if expected_tool is not None and evidence.tool_id != expected_tool:
         raise DgerGen4Error("GTG_INVOCATION_TOOL_MISMATCH")
+    if expected_operation is not None and evidence.operation != expected_operation:
+        raise DgerGen4Error("GTG_INVOCATION_OPERATION_MISMATCH")
     if _INVOCATION_ID_RE.fullmatch(evidence.invocation_id) is None:
         raise DgerGen4Error("GTG_INVOCATION_ID_INVALID")
     for key in ("tool_identity", "tool_tree", "gtg_identity", "registry_identity"):
@@ -172,10 +186,14 @@ def _validate_invocation_evidence(
     return evidence
 
 
-def _validate_ack(ack: Ack, expected_tool: str) -> InvocationEvidence:
+def _validate_ack(ack: Ack, expected_tool: str, expected_operation: str) -> InvocationEvidence:
     if not ack.ok or HEX64_RE.fullmatch(ack.digest) is None:
         raise DgerGen4Error("PEER_ACK_INVALID", expected_tool)
-    return _validate_invocation_evidence(ack.invocation_evidence, expected_tool=expected_tool)
+    return _validate_invocation_evidence(
+        ack.invocation_evidence,
+        expected_tool=expected_tool,
+        expected_operation=expected_operation,
+    )
 
 
 def load_service_identity(path: Path) -> ServiceIdentity:
@@ -279,10 +297,13 @@ def _validate_correlation(c: TrustedCorrelation, request: dict[str, Any], admiss
     invocation_ids = [item.invocation_id for item in evidence]
     if len(invocation_ids) != len(set(invocation_ids)):
         raise DgerGen4Error("GTG_INVOCATION_EVIDENCE_DUPLICATE")
-    required_tools = {GEP_TOOL_ID, AHC_TOOL_ID}
+    required_pairs = {
+        (GEP_TOOL_ID, "correlation_read"),
+        (AHC_TOOL_ID, "effect_read"),
+    }
     if c.chm_handoff_id is not None:
-        required_tools.add(CHM_TOOL_ID)
-    if {item.tool_id for item in evidence} != required_tools:
+        required_pairs.add((CHM_TOOL_ID, "handoff_read"))
+    if {(item.tool_id, item.operation) for item in evidence} != required_pairs:
         raise DgerGen4Error("TRUSTED_CORRELATION_PROVIDER_SET_INVALID")
 
     expected_corr = canonical_digest({
@@ -302,17 +323,21 @@ def _validate_correlation(c: TrustedCorrelation, request: dict[str, Any], admiss
         raise DgerGen4Error("TRUSTED_CORRELATION_DIGEST_MISMATCH")
 
 
-def _validate_ahc(obs: AhcObservation, c: TrustedCorrelation) -> None:
+def _validate_ahc(obs: AhcObservation, c: TrustedCorrelation, expected_operation: str) -> None:
     if obs.effect_reservation_id != c.ahc_effect_reservation_id or obs.gep_execution_id != c.gep_execution_id:
         raise DgerGen4Error("AHC_OBSERVATION_CORRELATION_MISMATCH")
     if obs.state not in {"RESERVED", "IN_DOUBT", "SUCCEEDED", "FAILED"}:
         raise DgerGen4Error("AHC_OBSERVATION_STATE_INVALID")
     if HEX64_RE.fullmatch(obs.observation_digest) is None:
         raise DgerGen4Error("AHC_OBSERVATION_DIGEST_INVALID")
-    _validate_invocation_evidence(obs.invocation_evidence, expected_tool=AHC_TOOL_ID)
+    _validate_invocation_evidence(
+        obs.invocation_evidence,
+        expected_tool=AHC_TOOL_ID,
+        expected_operation=expected_operation,
+    )
 
 
-def _validate_moh(obs: MohObservation, c: TrustedCorrelation) -> None:
+def _validate_moh(obs: MohObservation, c: TrustedCorrelation, expected_operation: str) -> None:
     if obs.gep_execution_id != c.gep_execution_id:
         raise DgerGen4Error("MOH_EXECUTION_MISMATCH")
     if obs.state not in MOH_ALL:
@@ -321,7 +346,11 @@ def _validate_moh(obs: MohObservation, c: TrustedCorrelation) -> None:
         _safe_id(obs.record_id, "MOH_RECORD_ID_INVALID")
     if HEX64_RE.fullmatch(obs.evidence_digest) is None:
         raise DgerGen4Error("MOH_EVIDENCE_DIGEST_INVALID")
-    _validate_invocation_evidence(obs.invocation_evidence, expected_tool=MOH_TOOL_ID)
+    _validate_invocation_evidence(
+        obs.invocation_evidence,
+        expected_tool=MOH_TOOL_ID,
+        expected_operation=expected_operation,
+    )
     raw = canonical_bytes(asdict(obs))
     if len(raw) > MAX_PEER_OBSERVATION_BYTES:
         raise DgerGen4Error("MOH_OBSERVATION_TOO_LARGE")
