@@ -19,5 +19,6 @@ for name in (
 result = unittest.TextTestRunner(verbosity=2).run(suite)
 if not result.wasSuccessful():
     raise SystemExit(1)
-subprocess.run([sys.executable, str(ROOT / "tools/validate_gen4_effect_surface_inventory.py")], check=True)
+for tool in ("validate_gen4_effect_surface_inventory.py", "validate_gen4_release.py"):
+    subprocess.run([sys.executable, str(ROOT / "tools" / tool)], check=True)
 print("DGER_GEN4_ASSURANCE_PASS")
