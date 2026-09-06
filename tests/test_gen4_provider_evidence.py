@@ -31,6 +31,39 @@ class WrongCorrelationOperationPeers(FakePeers):
         return replace(current, provider_evidence=tuple(evidence), correlation_digest=canonical_digest(body))
 
 
+class LegacyCorrelationInvocationPeers(FakePeers):
+    def _corr(self, request, admission_sha, payload_sha, service):
+        current = super()._corr(request, admission_sha, payload_sha, service)
+        evidence = list(current.provider_evidence)
+        evidence[0] = replace(evidence[0], invocation_id="inv_" + "0" * 32)
+        body = {
+            "origin": asdict(current.origin),
+            "service_deployment_id": current.service_deployment_id,
+            "ahc_execution_claim_id": current.ahc_execution_claim_id,
+            "ahc_effect_reservation_id": current.ahc_effect_reservation_id,
+            "ahc_work_revision": current.ahc_work_revision,
+            "gep_execution_id": current.gep_execution_id,
+            "gep_request_digest": current.gep_request_digest,
+            "gep_admission_sha256": current.gep_admission_sha256,
+            "payload_manifest_sha256": payload_sha,
+            "chm_handoff_id": current.chm_handoff_id,
+            "provider_evidence": [asdict(item) for item in evidence],
+        }
+        return replace(current, provider_evidence=tuple(evidence), correlation_digest=canonical_digest(body))
+
+
+class LegacyOriginInvocationPeers(FakePeers):
+    def __init__(self):
+        super().__init__()
+        self.origin = replace(self.origin, originating_invocation_id="inv-origin-001")
+
+
+class LegacyOriginDigestPeers(FakePeers):
+    def __init__(self):
+        super().__init__()
+        self.origin = replace(self.origin, context_digest="1" * 64)
+
+
 class WrongBeginOperationPeers(FakePeers):
     def ahc_begin(self, correlation):
         obs = super().ahc_begin(correlation)
@@ -80,6 +113,36 @@ class ProviderOperationEvidenceTests(unittest.TestCase):
 
     def test_correlation_same_tool_wrong_operation_fails_before_stage(self):
         peers = WrongCorrelationOperationPeers()
+        td, _root, _relay, state = self._run(peers)
+        try:
+            self.assertEqual(state["phase"], "INGRESS_FROZEN")
+            self.assertNotIn("stage", peers.calls)
+            self.assertEqual(peers.execute_calls, 0)
+        finally:
+            td.cleanup()
+
+    def test_legacy_gtg_invocation_evidence_alias_is_rejected(self):
+        peers = LegacyCorrelationInvocationPeers()
+        td, _root, _relay, state = self._run(peers)
+        try:
+            self.assertEqual(state["phase"], "INGRESS_FROZEN")
+            self.assertNotIn("stage", peers.calls)
+            self.assertEqual(peers.execute_calls, 0)
+        finally:
+            td.cleanup()
+
+    def test_legacy_origin_invocation_alias_is_rejected(self):
+        peers = LegacyOriginInvocationPeers()
+        td, _root, _relay, state = self._run(peers)
+        try:
+            self.assertEqual(state["phase"], "INGRESS_FROZEN")
+            self.assertNotIn("stage", peers.calls)
+            self.assertEqual(peers.execute_calls, 0)
+        finally:
+            td.cleanup()
+
+    def test_bare_origin_context_digest_alias_is_rejected(self):
+        peers = LegacyOriginDigestPeers()
         td, _root, _relay, state = self._run(peers)
         try:
             self.assertEqual(state["phase"], "INGRESS_FROZEN")
