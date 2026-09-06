@@ -21,7 +21,13 @@ class Gen4EffectMixin:
             receipt = self.peers.stage_moh(c, Path(state["frozen_stage"]), state["payload_manifest_sha256"])
         except Exception as exc:
             self._record_error(state, "stage_moh", exc); self._save_state(rid, state); self._status(rid, "MOH_STAGE_BLOCKED", code=self._error_code(exc)); return
-        if receipt.gep_execution_id != c.gep_execution_id or receipt.admission_sha256 != state["admission_sha256"] or receipt.payload_manifest_sha256 != state["payload_manifest_sha256"] or HEX64_RE.fullmatch(receipt.stage_digest) is None:
+        if (
+            receipt.gep_execution_id != c.gep_execution_id
+            or receipt.admission_sha256 != state["admission_sha256"]
+            or receipt.payload_manifest_sha256 != state["payload_manifest_sha256"]
+            or HEX64_RE.fullmatch(receipt.stage_digest) is None
+            or receipt.stage_kind != "LOCAL_MATERIALIZATION"
+        ):
             raise DgerGen4Error("MOH_STAGE_RECEIPT_MISMATCH")
         state["moh_stage_receipt"] = asdict(receipt)
         state["phase"] = "MOH_STAGED"
@@ -44,7 +50,7 @@ class Gen4EffectMixin:
             state["phase"] = "AHC_BEGIN_RECONCILE"
             state["ahc_begin_response_ambiguous"] = True
             self._save_state(rid, state); self._status(rid, "AHC_BEGIN_AMBIGUOUS", code=self._error_code(exc)); return
-        _validate_ahc(obs, c)
+        _validate_ahc(obs, c, "begin_effect")
         if obs.state != "IN_DOUBT":
             raise DgerGen4Error("AHC_BEGIN_DID_NOT_ESTABLISH_IN_DOUBT", obs.state)
         state["ahc_begin_observation"] = asdict(obs)
@@ -59,7 +65,7 @@ class Gen4EffectMixin:
             obs = self.peers.ahc_status(c)
         except Exception as exc:
             self._record_error(state, "ahc_status", exc); self._save_state(rid, state); self._status(rid, "AHC_RECONCILIATION_BLOCKED", code=self._error_code(exc)); return
-        _validate_ahc(obs, c)
+        _validate_ahc(obs, c, "effect_status")
         state["last_ahc_status"] = asdict(obs)
         if obs.state == "RESERVED":
             # Exact AHC truth proves begin did not durably happen. Retrying begin is
@@ -75,7 +81,9 @@ class Gen4EffectMixin:
 
     def _handle_moh(self, state: dict[str, Any], obs: MohObservation, via: str) -> None:
         rid = state["dger_request_id"]; c = self._c(state)
-        _validate_moh(obs, c)
+        if via not in {"status", "execute"}:
+            raise DgerGen4Error("MOH_OBSERVATION_SOURCE_INVALID")
+        _validate_moh(obs, c, via)
         state["last_moh_observation"] = asdict(obs)
         state["last_moh_observed_via"] = via
         if obs.state == "IN_DOUBT":
@@ -111,7 +119,7 @@ class Gen4EffectMixin:
             state["moh_status_calls"] = int(state.get("moh_status_calls", 0)) + 1
         except Exception as exc:
             self._record_error(state, "moh_status", exc); self._save_state(rid, state); self._status(rid, "MOH_STATUS_BLOCKED", code=self._error_code(exc)); return
-        _validate_moh(obs, c)
+        _validate_moh(obs, c, "status")
         if obs.state in MOH_SAFE_TO_FIRST_OR_PROVEN_RETRY:
             state["last_safe_moh_status"] = asdict(obs)
             state["last_safe_moh_status_at_utc"] = utc()
@@ -148,7 +156,7 @@ class Gen4EffectMixin:
             state["moh_status_calls"] = int(state.get("moh_status_calls", 0)) + 1
         except Exception as exc:
             self._record_error(state, "moh_status", exc); self._save_state(rid, state); self._status(rid, "MOH_RECONCILIATION_BLOCKED", code=self._error_code(exc)); return
-        _validate_moh(obs, c)
+        _validate_moh(obs, c, "status")
         if obs.state in MOH_SAFE_TO_FIRST_OR_PROVEN_RETRY:
             if state.get("moh_in_doubt_ever") is True:
                 state["phase"] = "MOH_IN_DOUBT"; self._save_state(rid, state); return
@@ -168,8 +176,11 @@ class Gen4EffectMixin:
         raw = state.get("moh_in_doubt_observation")
         if not isinstance(raw, dict):
             raise DgerGen4Error("MOH_IN_DOUBT_OBSERVATION_MISSING")
+        via = state.get("last_moh_observed_via")
+        if via not in {"status", "execute"}:
+            raise DgerGen4Error("MOH_OBSERVATION_SOURCE_INVALID")
         obs = MohObservation(**raw)
-        _validate_moh(obs, c)
+        _validate_moh(obs, c, via)
         try:
             ack = self.peers.ahc_note_in_doubt(c, obs)
         except Exception as exc:
@@ -177,7 +188,7 @@ class Gen4EffectMixin:
             self._save_state(rid, state)
             self._status(rid, "AHC_IN_DOUBT_REPORT_BLOCKED", code=self._error_code(exc))
             return
-        _validate_ack(ack, AHC_TOOL_ID)
+        _validate_ack(ack, AHC_TOOL_ID, "note_moh_in_doubt")
         state["ahc_in_doubt_report_ack"] = asdict(ack)
         state["phase"] = "MOH_IN_DOUBT"
         state.pop("last_error", None)
@@ -227,7 +238,7 @@ class Gen4EffectMixin:
             ack = self.peers.ahc_accept_terminal(c, state["moh_terminal_digest"], state["result_ref"], state["result_sha256"])
         except Exception as exc:
             self._record_error(state, "ahc_accept_terminal", exc); self._save_state(rid, state); self._status(rid, "AHC_TERMINAL_BLOCKED", code=self._error_code(exc)); return
-        _validate_ack(ack, AHC_TOOL_ID)
+        _validate_ack(ack, AHC_TOOL_ID, "accept_terminal_effect")
         state["ahc_terminal_ack"] = asdict(ack)
         state["phase"] = "CHM_PENDING" if c.chm_handoff_id is not None else "DONE"
         self._save_state(rid, state); self._status(rid, state["phase"]); self.fault("after_ahc_terminal")
@@ -243,7 +254,7 @@ class Gen4EffectMixin:
         except Exception as exc:
             self._record_error(state, "chm_publish_terminal", exc); self._save_state(rid, state); self._status(rid, "CHM_PUBLICATION_BLOCKED", code=self._error_code(exc)); return
         try:
-            _validate_ack(ack, CHM_TOOL_ID)
+            _validate_ack(ack, CHM_TOOL_ID, "publish_terminal_result")
         except DgerGen4Error:
             state["phase"] = "CHM_RESULT_CONFLICT"; self._save_state(rid, state); raise
         state["chm_terminal_ack"] = asdict(ack)
