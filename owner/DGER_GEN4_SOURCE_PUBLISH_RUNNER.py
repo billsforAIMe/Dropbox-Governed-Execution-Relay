@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
@@ -14,6 +15,8 @@ KNOWN_ROOTS = (
     Path("/opt/homebrew/bin"),
     Path("/usr/local/bin"),
 )
+GITSTORAGE_RUNTIME = Path("/Users/brettmacpro/ChatGPT/Installed/Tools/GitStorage/gitstorage")
+GITSTORAGE_SHA256 = "1059071d24ffd90502b80197702ce38a1d14b855dcb42c597c99a073cffbe587"
 
 
 def physical_executable(path: Path) -> str | None:
@@ -27,7 +30,19 @@ def physical_executable(path: Path) -> str | None:
     return str(resolved)
 
 
+def exact_gitstorage_runtime() -> str:
+    found = physical_executable(GITSTORAGE_RUNTIME)
+    if found is None:
+        raise RuntimeError("GITSTORAGE_REGISTERED_RUNTIME_MISSING_OR_UNSAFE")
+    digest = hashlib.sha256(Path(found).read_bytes()).hexdigest()
+    if digest != GITSTORAGE_SHA256:
+        raise RuntimeError(f"GITSTORAGE_RUNTIME_SHA256_MISMATCH:{digest}")
+    return found
+
+
 def governed_find_exe(*names: str) -> str:
+    if any(Path(name).name == "gitstorage" for name in names):
+        return exact_gitstorage_runtime()
     for name in names:
         candidates: list[Path]
         if "/" in name:
@@ -56,6 +71,9 @@ def self_test() -> None:
     resolved = governed_find_exe("/bin/sh")
     if not Path(resolved).is_file() or not os.access(resolved, os.X_OK):
         raise RuntimeError("RUNNER_RESOLUTION_SELFTEST_FAILED")
+    gs = governed_find_exe("/usr/local/bin/gitstorage", "/opt/homebrew/bin/gitstorage", "gitstorage")
+    if gs != str(GITSTORAGE_RUNTIME.resolve(strict=True)):
+        raise RuntimeError("GITSTORAGE_RUNTIME_RESOLUTION_SELFTEST_FAILED")
     module = load_carrier()
     module.find_exe = governed_find_exe
     saved = sys.argv[:]
