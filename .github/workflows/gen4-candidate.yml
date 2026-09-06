@@ -1,0 +1,29 @@
+name: DGER Gen4 candidate regression
+
+on:
+  push:
+    branches:
+      - builder/dger-gen4-fixed-dispatcher
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile changed Python surfaces
+        run: python -m compileall -q src tests tools
+      - name: Gen4 adversarial tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest tests.test_gen4 -v
+      - name: Effect-surface inventory validation
+        run: python tools/validate_gen4_effect_surface_inventory.py
