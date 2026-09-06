@@ -144,10 +144,6 @@ class Gen4EffectMixin:
         try:
             self._handle_moh(state, obs, "execute")
         except DgerGen4Error as exc:
-            # The process-start call has already left DGER. A response that cannot be
-            # authenticated/correlated to the exact MOH execute operation is itself
-            # execution ambiguity. Status may still prove terminal truth, but even a
-            # later NOT_FOUND/ADMITTED observation must never reopen execute permission.
             self._record_error(state, "moh_execute_response", exc)
             state["moh_in_doubt_ever"] = True
             state["moh_in_doubt_source"] = "INVALID_EXECUTE_RESPONSE"
@@ -170,8 +166,7 @@ class Gen4EffectMixin:
             state["last_safe_moh_status"] = asdict(obs)
             state["pre_execute_status_required"] = False
             state["phase"] = "AHC_IN_DOUBT"
-            self._save_state(rid, state); self._status(rid, f"MOH_{obs.state}_RECONCILED_SAFE")
-            return
+            self._save_state(rid, state); self._status(rid, f"MOH_{obs.state}_RECONCILED_SAFE"); return
         self._handle_moh(state, obs, "status")
 
     def _report_moh_in_doubt(self, state: dict[str, Any]) -> None:
@@ -186,14 +181,16 @@ class Gen4EffectMixin:
             raise DgerGen4Error("MOH_OBSERVATION_SOURCE_INVALID")
         obs = MohObservation(**raw)
         _validate_moh(obs, c, via)
+        moh_observation_digest = canonical_digest(asdict(obs))
         try:
-            ack = self.peers.ahc_note_in_doubt(c, obs)
+            ack = self.peers.ahc_note_in_doubt(c, moh_observation_digest)
         except Exception as exc:
             self._record_error(state, "ahc_note_in_doubt", exc)
             self._save_state(rid, state)
             self._status(rid, "AHC_IN_DOUBT_REPORT_BLOCKED", code=self._error_code(exc))
             return
         _validate_ack(ack, AHC_TOOL_ID, "note_moh_in_doubt")
+        state["ahc_in_doubt_report_digest"] = moh_observation_digest
         state["ahc_in_doubt_report_ack"] = asdict(ack)
         state["phase"] = "MOH_IN_DOUBT"
         state.pop("last_error", None)
@@ -259,7 +256,7 @@ class Gen4EffectMixin:
         except Exception as exc:
             self._record_error(state, "chm_publish_terminal", exc); self._save_state(rid, state); self._status(rid, "CHM_PUBLICATION_BLOCKED", code=self._error_code(exc)); return
         try:
-            _validate_ack(ack, CHM_TOOL_ID, "publish_terminal_result")
+            _validate_ack(ack, CHM_TOOL_ID, "handoff_attach_result")
         except DgerGen4Error:
             state["phase"] = "CHM_RESULT_CONFLICT"; self._save_state(rid, state); raise
         state["chm_terminal_ack"] = asdict(ack)
