@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import socket
 import stat
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -17,7 +19,10 @@ DGER_TREE = "bebbc449d3c1319e2876774eec8dfef05b174ad9"
 GTG_REPO = "billsforAIMe/Governed-Tool-Gateway"
 GTG_COMMIT = "9333e6a94ef434386b28c4e77bff63fad27e4b5d"
 REGISTRY_REPO = "billsforAIMe/Tool-Registry"
-GTG_URL = "http://127.0.0.1:8799/mcp"
+GTG_HOST = "127.0.0.1"
+GTG_PORT = 8799
+GTG_URL = f"http://{GTG_HOST}:{GTG_PORT}/mcp"
+GTG_LAUNCHD_LABEL = "com.governedtools.gateway"
 
 
 def require(condition: bool, message: str) -> None:
@@ -103,6 +108,37 @@ def tools_bearer_token() -> str:
     return token
 
 
+def gtg_listening() -> bool:
+    try:
+        with socket.create_connection((GTG_HOST, GTG_PORT), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def ensure_existing_gtg_service() -> None:
+    if gtg_listening():
+        print("gtg_runtime=ALREADY_LISTENING")
+        return
+    launchctl = find_executable(["/bin/launchctl", "/usr/bin/launchctl"])
+    id_cmd = find_executable(["/usr/bin/id"])
+    uid = run([id_cmd, "-u"], timeout=10).stdout.strip()
+    require(uid.isdigit(), "GTG_LAUNCHD_UID_INVALID")
+    target = f"gui/{uid}/{GTG_LAUNCHD_LABEL}"
+    enrolled = run([launchctl, "print", target], timeout=20, check=False)
+    require(enrolled.returncode == 0,
+            "GTG_LAUNCHAGENT_NOT_REGISTERED:" + enrolled.stderr[-1000:])
+    kicked = run([launchctl, "kickstart", "-k", target], timeout=30, check=False)
+    require(kicked.returncode == 0,
+            "GTG_LAUNCHAGENT_KICKSTART_FAILED:" + kicked.stderr[-1000:])
+    for _ in range(30):
+        if gtg_listening():
+            print("gtg_runtime=KICKSTARTED_EXISTING_LAUNCHAGENT")
+            return
+        time.sleep(0.5)
+    raise RuntimeError("GTG_LAUNCHAGENT_DID_NOT_BECOME_READY")
+
+
 def gtg_call(token: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     request = {
         "jsonrpc": "2.0",
@@ -162,6 +198,10 @@ def self_test() -> None:
     find_registry_results(sample, found)
     require(len(found) == 1 and found[0]["tool_current_identity"] == DGER_COMMIT,
             "SELFTEST_RESULT_DISCOVERY")
+    require(GTG_HOST == "127.0.0.1" and GTG_PORT == 8799,
+            "SELFTEST_GTG_LOOPBACK_BINDING")
+    require(GTG_LAUNCHD_LABEL == "com.governedtools.gateway",
+            "SELFTEST_GTG_LAUNCHD_LABEL")
     print("DGER_GEN4_REGISTRY_RECONCILE_SELFTEST=PASS")
 
 
@@ -182,6 +222,7 @@ def main() -> None:
     print(f"registry_before={registry_before}")
     print("dger_delivery_identity=PASS")
 
+    ensure_existing_gtg_service()
     token = tools_bearer_token()
 
     structured = gtg_call(
