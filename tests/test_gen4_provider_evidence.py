@@ -106,26 +106,32 @@ class ProviderOperationEvidenceTests(unittest.TestCase):
         finally:
             td.cleanup()
 
-    def test_moh_execute_same_tool_wrong_operation_never_becomes_terminal_truth(self):
+    def test_moh_execute_same_tool_wrong_operation_latches_no_repeat(self):
         peers = WrongMohExecuteOperationPeers()
-        td, _root, relay, state = self._run(peers)
+        td, root, relay, state = self._run(peers)
         try:
             self.assertEqual(state["phase"], "MOH_RECONCILE")
+            self.assertTrue(state["moh_in_doubt_ever"])
+            self.assertEqual(state["moh_in_doubt_source"], "INVALID_EXECUTE_RESPONSE")
+            self.assertTrue(state["moh_execute_response_invalid"])
             starts = peers.process_starts
             relay.scan_once()
+            state2 = json.loads((root / "state/gen4/executions/dger-001.json").read_text())
+            self.assertEqual(state2["phase"], "MOH_IN_DOUBT")
             self.assertEqual(peers.process_starts, starts)
+            self.assertEqual(peers.execute_calls, 1)
         finally:
             td.cleanup()
 
     def test_terminal_ack_same_tool_wrong_operation_never_reexecutes(self):
         peers = WrongTerminalAckOperationPeers()
-        td, _root, relay, state = self._run(peers)
+        td, root, relay, state = self._run(peers)
         try:
             self.assertEqual(state["phase"], "AHC_TERMINAL_PENDING")
             starts = peers.process_starts
             relay.scan_once()
             self.assertEqual(peers.process_starts, starts)
-            state2 = json.loads((_root / "state/gen4/executions/dger-001.json").read_text())
+            state2 = json.loads((root / "state/gen4/executions/dger-001.json").read_text())
             self.assertEqual(state2["phase"], "AHC_TERMINAL_PENDING")
         finally:
             td.cleanup()
