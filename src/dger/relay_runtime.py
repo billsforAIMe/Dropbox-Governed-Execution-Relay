@@ -20,6 +20,7 @@ from .relay_state import (
     _chm_result, _result_record, _safe_execution_dir, _stage_digest, _unwrap_gtg_result, _validate_moh_response, freeze_ingress,
     load_state, materialize_moh_stage, save_state,
 )
+from .legacy_guard import LegacySurfaceRetired, assert_legacy_allowed
 
 class RelayRuntimeMixin:
     def __init__(
@@ -31,6 +32,10 @@ class RelayRuntimeMixin:
         gateway: SemanticGateway,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
+        try:
+            assert_legacy_allowed(state_root)
+        except LegacySurfaceRetired as exc:
+            raise DgerError(str(exc)) from exc
         for root, code in ((transport_root, "UNSAFE_TRANSPORT_ROOT"), (state_root, "UNSAFE_STATE_ROOT"), (moh_home, "UNSAFE_MOH_HOME")):
             if root.exists() and root.is_symlink():
                 raise DgerError(code)
