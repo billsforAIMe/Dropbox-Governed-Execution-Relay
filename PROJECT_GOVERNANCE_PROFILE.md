@@ -7,37 +7,67 @@
 - Tool Registry is descriptive discovery only.
 - Authoritative persistent Tool State and deployment/recovery evidence locus: `/Users/brettmacpro/AI/State/Tools/Dropbox Governed Execution Relay`.
 
-## Applicable stronger classes for Generation 3
+## Applicable stronger classes for Generation 4
 
-Generation 3 materially changes future automated execution/recovery behavior, trust boundaries, persistent state, external-effect routing, and deployment/runtime bindings. The applicable LG-00 classes therefore include consequential external execution capability, trust/security boundary change, persistent recovery/state change, and material deployment/activation when installation is performed. Independent non-Builder semantic review is required before durable publication.
+Generation 4 materially changes future automated external-execution composition, trust/authorization boundaries, persistent reconciliation State, peer identity evidence, legacy execution-surface retirement, and the machinery used for later secure activation. The applicable LG-00 classes therefore include `TRUST_SECURITY_CREDENTIAL_PERMISSION_OR_PRIVILEGE`, `CONSEQUENTIAL_EXECUTION_EXTERNAL_EFFECT_OR_EXECUTION_CAPABILITY`, `PERSISTENT_DESTRUCTIVE_SCHEMA_OR_DATA`, and, when installation/cutover is performed, `DEPLOYMENT_MIGRATION_OR_RECOVERY`.
+
+Generation-4 source publication is separate from runtime activation. Source publication requires independent non-Builder semantic review of the changed trust/execution/recovery proposition. It does not itself create the protected DGER service credential, Gen4 activation marker, peer tuple, or Mac cutover. Activation remains separately blocked until exact delivered peers and deployment preconditions are satisfied.
 
 ## Runtime safety model
 
-- MOH is the only host-execution truth source.
-- DGER transports immutable MOH stages and reconciles execute/status; it never chooses arbitrary host commands.
-- CHM is handoff/result/history truth and never decides whether the Mac process ran.
-- GTG/GTC is the semantic provider/currentness route. MOH/CHM Doctor identities are acceptance-time observations, while each successful semantic invocation must carry exact GTG invocation-time Tool identity attestation and consistent invocation evidence.
-- The consumer Tool remains exact to the immutable MOH envelope commit/tree/repository/selector accepted by DGER.
-- Dropbox is transport only.
-- New work fails closed unless required MOH/CHM/consumer semantic capabilities are current and callable.
-- During recovery, DGER preserves immutable execution intent and never blind-repeats MOH execution. A later current-compatible MOH or CHM release may service a semantic call through GTG; DGER records that invocation's exact attested provider identity rather than relabeling it as the earlier Doctor observation.
-- A CHM outage after MOH terminal truth can cause only CHM-publication retry, never host re-execution.
-- MOH `IN_DOUBT` remains unresolved and does not close CHM as success.
+- MOH remains the sole Mac process-start and terminal host-truth authority.
+- AHC is consequential-effect lifecycle/entitlement authority. DGER may begin/reconcile/report only the exact AHC effect bound by authenticated peer truth; DGER never creates Builder entitlement or wake authorization.
+- GEP remains execution-admission authority. DGER preserves the exact GEP-signed MOH admission bytes and payload closure unchanged; it does not mint, repair, widen, resign, parse for authorization, or rotate admission trust.
+- CHM is optional correlation/result/history only and never authorizes host execution or lifecycle progress.
+- GTG/GTC is the semantic provider/currentness/authorization route. Every successful Gen4 semantic peer operation must carry exact invocation-time GTG provider identity evidence: invocation ID, Tool commit/tree, GTG identity, and Registry identity. The exact delivered peer adapter must reject a provider that is not current-compatible before returning success.
+- The immediate authenticated service actor is `EXECUTION_RELAY`; origin tenant/principal/deployment/fleet epoch remains separately trusted and non-caller-selectable.
+- Caller/Dropbox input cannot establish tenant, principal, deployment, role, fleet epoch, execution entitlement, service identity, execution profile, shell, executable, interpreter, argv, cwd, environment, PATH, handler, trust key, result channel, or retry policy.
+- Dropbox is immutable transport only and never establishes software authority, execution authority, lifecycle authority, or trusted identity.
+- Private accepted DGER State is independent of continued Dropbox package presence and binds exact request/admission/payload/READY bytes plus trusted correlation.
+- Before any MOH execute call, DGER durably records its local reconciliation boundary, requires exact AHC `IN_DOUBT`, obtains exact MOH status truth, then durably records that the MOH execute call may have happened.
+- After an ambiguous/lost MOH call, DGER reconciles status before any possible same-ID retry. Only exact fresh `NOT_FOUND`/`ADMITTED` truth can permit a retry; transport retry, provider advancement, CHM state, wake state, service restart, or lease expiry cannot.
+- MOH `IN_DOUBT` is monotonic for DGER execution permission: once observed, DGER never executes that GEP execution again and retries only AHC in-doubt reporting.
+- Durable MOH terminal truth is published to AHC before optional CHM history/result publication. AHC/CHM outages after MOH terminal can retry only their own idempotent reporting phases, never host execution.
+- Exact result replay is idempotent; changed-byte replay/correlation is a conflict.
+
+## Generation-3 compatibility and anti-circumvention
+
+Generation-4 source publication deliberately permits the exact delivered Generation-3 runtime to remain installed before secure cutover. The authoritative release manifest declares that predecessor runtime compatibility explicitly.
+
+The protected activation predicate is DGER State `gen4/ACTIVATED.json`. Once that marker exists, or if marker bytes are malformed/unsafe, Generation-3 runtime construction fails closed. A later Gen4 activation act must create the marker only after exact peer tuple/currentness, service identity, deployment and rollback requirements are satisfied.
+
+The older Prototype R0 direct-GEP process-start module is permanently retired in Generation-4 source; it is not a pre-activation compatibility path. `GOVERNED_EFFECT_SURFACE_INVENTORY.json` plus its validator inventory the materially callable execution/admin/recovery/compatibility surfaces and mechanically detect an unclassified DGER Python execution primitive.
+
+## Peer dependency and activation boundary
+
+Generation 4 source is allowed to be durable while exact peer contracts are still developing, but production Gen4 semantics remain fail-closed through `UnavailableGen4Peers`. DGER MUST NOT invent substitutes for unavailable peer trust contracts.
+
+Activation requires an exact current-compatible tuple providing at least:
+
+- GTG/GTC authenticated delegated `EXECUTION_RELAY` context, operation authorization, and invocation-time identity attestation;
+- AHC exact effect reservation/begin/status/in-doubt/terminal-result and causal wake semantics;
+- GEP exact namespace-bound execution, signed MOH admission, immutable execution/admission correlation, and reconciliation truth;
+- CHM tenant-bound external-execution correlation/history without lifecycle authority;
+- MOH exact signed-admission staging/execute/status contract and no-blind-repeat behavior.
+
+The later DGER adapter that binds those delivered peer interfaces is a changed material input and receives change-driven review for that adapter proposition only; unchanged Gen4 core recovery/order semantics reuse prior valid coverage.
 
 ## Portability and Mac boundary
 
-Relay protocol, concurrency, crash-window, identity, stage-integrity, and CHM-adapter tests are portable cloud work. Actual MOH invocation/LaunchAgent activation is Mac-specific. Source development and publication are not Mac-specific.
+Relay protocol, namespace/replay isolation, crash-window ordering, state integrity, peer normalization, provider-evidence handling, terminal retry behavior, and effect-surface inventory tests are portable cloud work. Actual MOH invocation through installed peers, DGER service-credential provisioning, LaunchAgent deployment, protected activation-marker creation, cross-service integrated qualification, and cutover are Mac-specific.
+
+Source development/publication is not Mac-specific merely because the eventual execution effect is hosted on macOS.
 
 ## Governed Python
 
-Governed Python assurance uses authoritative PyRunway. Ambient/system Python may be used only as non-authoritative scratch diagnostics and is never publication or deployment evidence. Fresh cloud environments without `/usr/local/bin/pyrunway` must materialize exact governed PyRunway bytes or fail `PYRUNWAY_ENVIRONMENT_UNAVAILABLE`.
+Governed Python assurance uses authoritative PyRunway. Ambient/system Python may be used only as non-authoritative scratch diagnostics and is never publication or deployment evidence. Fresh cloud environments without an installed PyRunway may materialize exact authoritative PyRunway source bytes, bind its declared Linux-cloud dependencies through its governed installer, verify the resulting runtime, and then use that exact governed runtime. If exact materialization/runtime verification cannot be established, fail `PYRUNWAY_ENVIRONMENT_UNAVAILABLE`.
 
 ## Deployment
 
-Material Mac activation is governed deployment work. Use the current bound Governed Offline Deployer/GTG path when available; do not replace it with ad-hoc shell installation. Quiesce the existing LaunchAgent, prove exact predecessor/runtime identity, deploy atomically, verify, then reactivate. Preserve rollback to the exact predecessor runtime until post-activation verification passes.
+Material Mac activation is governed deployment/recovery work. Use the current bound Governed Offline Deployer/GTG path when available; do not replace it with ad-hoc shell installation. Quiesce the existing LaunchAgent, prove exact predecessor/runtime identity, deploy atomically, verify, then reactivate. Preserve rollback to the exact predecessor runtime until post-activation verification passes.
 
-Generation 3 binds that lifecycle through `deployment/dger_god_adapter.py` and the data-only `deployment/god_profile.template.json`. The adapter SHA-256 is substituted mechanically into exactly one template placeholder when the exact reviewed adapter bytes are materialized into DGER Tool State; the rendered profile is then hash-pinned for GOD invocation. The adapter uses the launchd service identity as lifecycle-control authority, never PID-only signaling, and preserves write-ahead rollback necessity before candidate configuration mutation so predecessor delivered identity, runtime binding, GTG token state, and LaunchAgent plist are restored through rollback quiescence after interrupted deployment.
+The existing Generation-3 deployment lifecycle adapter and profile remain unchanged source mechanics for the pre-activation installed runtime. They are not authority to create the Gen4 activation marker. A later Gen4 activation must update/render the exact deployment profile as needed for the delivered peer/service tuple and must preserve write-ahead rollback necessity before any candidate configuration or activation-State mutation.
 
 ## SG11 semantic-access classification
 
-DGER is explicitly classified by current Tool Registry semantic-access metadata as `SUBSTRATE`, exception class `transport`: an immutable transport/recovery relay beneath normal semantic Tool business logic when the direct governed path is unavailable. Generation 3 preserves that narrow exception. DGER does not become the business-semantic front door for MOH, CHM, or consumer Tools; those Tool-owned capabilities remain resolved and invoked through GTG/GTC. The Dropbox transport never establishes software authority, semantic truth, permission, or execution truth.
+DGER remains `SUBSTRATE`, exception class `transport`: an immutable transport/recovery relay beneath normal semantic Tool business logic when the direct governed path is unavailable or asynchronous Mac execution is required. Generation 4 does not turn DGER into the business-semantic front door for AHC, GEP, MOH, CHM, or consumer Tools. The Dropbox transport never establishes software authority, semantic truth, permission, or execution truth.
