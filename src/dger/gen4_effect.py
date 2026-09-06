@@ -9,7 +9,10 @@ from .gen4_primitives import (
     MOH_SAFE_TO_FIRST_OR_PROVEN_RETRY, MOH_TERMINAL, RESULT_SCHEMA, atomic_bytes, canonical_digest,
     canonical_file_bytes, read_regular, sha256, utc,
 )
-from .gen4_contract import AhcObservation, MohObservation, TrustedCorrelation, _validate_ahc, _validate_moh
+from .gen4_contract import (
+    AHC_TOOL_ID, CHM_TOOL_ID, AhcObservation, MohObservation, TrustedCorrelation,
+    _validate_ack, _validate_ahc, _validate_moh,
+)
 
 class Gen4EffectMixin:
     def _stage(self, state: dict[str, Any]) -> None:
@@ -158,7 +161,6 @@ class Gen4EffectMixin:
             return
         self._handle_moh(state, obs, "status")
 
-
     def _report_moh_in_doubt(self, state: dict[str, Any]) -> None:
         rid = state["dger_request_id"]; c = self._c(state)
         if state.get("moh_in_doubt_ever") is not True:
@@ -175,8 +177,7 @@ class Gen4EffectMixin:
             self._save_state(rid, state)
             self._status(rid, "AHC_IN_DOUBT_REPORT_BLOCKED", code=self._error_code(exc))
             return
-        if not ack.ok or HEX64_RE.fullmatch(ack.digest) is None:
-            raise DgerGen4Error("AHC_IN_DOUBT_ACK_INVALID")
+        _validate_ack(ack, AHC_TOOL_ID)
         state["ahc_in_doubt_report_ack"] = asdict(ack)
         state["phase"] = "MOH_IN_DOUBT"
         state.pop("last_error", None)
@@ -196,6 +197,7 @@ class Gen4EffectMixin:
             "moh_state": terminal["state"],
             "moh_record_id": terminal.get("record_id"),
             "moh_evidence_digest": terminal["evidence_digest"],
+            "moh_invocation_evidence": terminal.get("invocation_evidence"),
             "moh_result": terminal.get("result"),
             "terminal_digest": state["moh_terminal_digest"],
         }
@@ -225,8 +227,7 @@ class Gen4EffectMixin:
             ack = self.peers.ahc_accept_terminal(c, state["moh_terminal_digest"], state["result_ref"], state["result_sha256"])
         except Exception as exc:
             self._record_error(state, "ahc_accept_terminal", exc); self._save_state(rid, state); self._status(rid, "AHC_TERMINAL_BLOCKED", code=self._error_code(exc)); return
-        if not ack.ok or HEX64_RE.fullmatch(ack.digest) is None:
-            raise DgerGen4Error("AHC_TERMINAL_ACK_INVALID")
+        _validate_ack(ack, AHC_TOOL_ID)
         state["ahc_terminal_ack"] = asdict(ack)
         state["phase"] = "CHM_PENDING" if c.chm_handoff_id is not None else "DONE"
         self._save_state(rid, state); self._status(rid, state["phase"]); self.fault("after_ahc_terminal")
@@ -241,8 +242,10 @@ class Gen4EffectMixin:
             ack = self.peers.chm_publish_terminal(c, state["result_ref"], state["result_sha256"])
         except Exception as exc:
             self._record_error(state, "chm_publish_terminal", exc); self._save_state(rid, state); self._status(rid, "CHM_PUBLICATION_BLOCKED", code=self._error_code(exc)); return
-        if not ack.ok or HEX64_RE.fullmatch(ack.digest) is None:
-            state["phase"] = "CHM_RESULT_CONFLICT"; self._save_state(rid, state); raise DgerGen4Error("CHM_RESULT_CONFLICT")
+        try:
+            _validate_ack(ack, CHM_TOOL_ID)
+        except DgerGen4Error:
+            state["phase"] = "CHM_RESULT_CONFLICT"; self._save_state(rid, state); raise
         state["chm_terminal_ack"] = asdict(ack)
         state["phase"] = "DONE"
         self._save_state(rid, state); self._status(rid, "DONE")
