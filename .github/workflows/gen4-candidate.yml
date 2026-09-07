@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - builder/dger-gen4-fixed-dispatcher
+      - assurance/gen4-gep14-correlation
   pull_request:
     branches:
       - main
