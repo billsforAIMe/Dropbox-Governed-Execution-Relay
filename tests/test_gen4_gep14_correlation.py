@@ -89,7 +89,6 @@ def gep_result() -> dict:
             "deployment_id": "builder-deployment-A",
             "fleet_epoch": 7,
             "originating_invocation_id": "gtg_inv_" + "b" * 64,
-            # Exact GEP Gen14 wire projection strips the sha256: prefix.
             "context_digest": "1" * 64,
         },
         "service_deployment_id": "dger-deployment-A",
@@ -154,18 +153,15 @@ class Reader:
         self.calls: list[tuple[str, str, dict]] = []
         self.rows = {
             (GEP_TOOL, GEP_CORRELATION_OPERATION): AuthenticatedPeerRead(
-                gep_result(),
-                delegated_context(GEP_TOOL, GEP_CORRELATION_OPERATION, "c"),
+                gep_result(), delegated_context(GEP_TOOL, GEP_CORRELATION_OPERATION, "c"),
                 evidence(GEP_TOOL, GEP_CORRELATION_OPERATION, 1),
             ),
             (AHC_TOOL, AHC_EFFECT_READ_OPERATION): AuthenticatedPeerRead(
-                ahc_result(),
-                delegated_context(AHC_TOOL, AHC_EFFECT_READ_OPERATION, "d"),
+                ahc_result(), delegated_context(AHC_TOOL, AHC_EFFECT_READ_OPERATION, "d"),
                 evidence(AHC_TOOL, AHC_EFFECT_READ_OPERATION, 2),
             ),
             (CHM_TOOL, CHM_HANDOFF_READ_OPERATION): AuthenticatedPeerRead(
-                chm_result(),
-                delegated_context(CHM_TOOL, CHM_HANDOFF_READ_OPERATION, "e"),
+                chm_result(), delegated_context(CHM_TOOL, CHM_HANDOFF_READ_OPERATION, "e"),
                 evidence(CHM_TOOL, CHM_HANDOFF_READ_OPERATION, 3),
             ),
         }
@@ -194,7 +190,6 @@ class Gep14CorrelationAdapterTests(unittest.TestCase):
         self.assertEqual(correlation.ahc_work_revision, str(WORK_REVISION))
         self.assertEqual(correlation.gep_admission_sha256, ADMISSION_SHA256)
         self.assertEqual(correlation.chm_handoff_id, HANDOFF_ID)
-        # DGER persists the authenticated prefixed GTG value, not GEP's bare view.
         self.assertEqual(correlation.origin.context_digest, ORIGIN_CONTEXT_DIGEST)
         self.assertEqual(
             [(item.tool_id, item.operation) for item in correlation.provider_evidence],
@@ -227,10 +222,7 @@ class Gep14CorrelationAdapterTests(unittest.TestCase):
         self.assertIsNone(correlation.chm_handoff_id)
         self.assertEqual(
             [(item.tool_id, item.operation) for item in correlation.provider_evidence],
-            [
-                (GEP_TOOL, GEP_CORRELATION_OPERATION),
-                (AHC_TOOL, AHC_EFFECT_READ_OPERATION),
-            ],
+            [(GEP_TOOL, GEP_CORRELATION_OPERATION), (AHC_TOOL, AHC_EFFECT_READ_OPERATION)],
         )
         self.assertEqual(len(self.reader.calls), 2)
 
@@ -255,6 +247,25 @@ class Gep14CorrelationAdapterTests(unittest.TestCase):
             self.establish()
         self.assertEqual(len(self.reader.calls), 1)
 
+    def test_existing_gep_result_binding_fails_before_ahc(self):
+        row = self.reader.rows[(GEP_TOOL, GEP_CORRELATION_OPERATION)]
+        changed = dict(row.result)
+        changed["result_binding"] = {
+            "schema_version": "GEP_TRUSTED_RESULT_BINDING_V1",
+            "execution_id": EXECUTION_ID,
+            "request_digest": GEP_REQUEST_DIGEST,
+            "status": "SUCCEEDED",
+            "result_manifest_digest": "7" * 64,
+            "operation_result_digest": "8" * 64,
+            "execution_evidence_digest": "9" * 64,
+        }
+        self.reader.rows[(GEP_TOOL, GEP_CORRELATION_OPERATION)] = AuthenticatedPeerRead(
+            changed, row.delegated_context, row.invocation_evidence
+        )
+        with self.assertRaisesRegex(DgerGen4Error, "GEP_RESULT_ALREADY_BOUND"):
+            self.establish()
+        self.assertEqual(len(self.reader.calls), 1)
+
     def test_ahc_work_revision_mismatch_fails_before_chm(self):
         row = self.reader.rows[(AHC_TOOL, AHC_EFFECT_READ_OPERATION)]
         changed = dict(row.result)
@@ -265,6 +276,16 @@ class Gep14CorrelationAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(DgerGen4Error, "AHC_WORK_REVISION_MISMATCH"):
             self.establish()
         self.assertEqual(len(self.reader.calls), 2)
+
+    def test_noncanonical_ahc_revision_type_is_rejected(self):
+        row = self.reader.rows[(AHC_TOOL, AHC_EFFECT_READ_OPERATION)]
+        changed = dict(row.result)
+        changed["workstream_revision"] = str(WORK_REVISION)
+        self.reader.rows[(AHC_TOOL, AHC_EFFECT_READ_OPERATION)] = AuthenticatedPeerRead(
+            changed, row.delegated_context, row.invocation_evidence
+        )
+        with self.assertRaisesRegex(DgerGen4Error, "AHC_EFFECT_READ_RESULT_INVALID"):
+            self.establish()
 
     def test_chm_cannot_claim_execution_authority(self):
         row = self.reader.rows[(CHM_TOOL, CHM_HANDOFF_READ_OPERATION)]
