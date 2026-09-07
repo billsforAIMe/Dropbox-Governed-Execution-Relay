@@ -16,7 +16,7 @@ REQUIRED_PATHS = {
     "src/dger/relay.py", "scripts/dger.py", "src/dger/relay_v1.py", "src/dger/relay_moh_invoke.py",
     "src/dger/relay_moh.py", "launcher/dropbox-governed-execution-relay", "src/dger/gen4.py",
     "src/dger/gen4_contract.py", "src/dger/gen4_driver.py", "src/dger/gen4_effect.py",
-    "deployment/dger_god_adapter.py",
+    "src/dger/gen4_runtime_peers.py", "deployment/dger_god_adapter.py",
 }
 
 
@@ -96,6 +96,29 @@ def main() -> int:
     ):
         if token not in contract: fail(f"PROVIDER_EVIDENCE_CONTRACT_TOKEN_MISSING:{token}")
 
+    adapter_path = ROOT / "src/dger/gen4_runtime_peers.py"
+    adapter = adapter_path.read_text("utf-8")
+    adapter_functions = function_names(adapter_path)
+    for fn in {
+        "stage_moh", "ahc_begin", "ahc_status", "moh_execute", "moh_status",
+        "ahc_note_in_doubt", "ahc_accept_terminal", "chm_publish_terminal",
+    }:
+        if fn not in adapter_functions: fail(f"RUNTIME_PEER_FUNCTION_MISSING:{fn}")
+    for token in (
+        "class UnavailableAuthenticatedPeerInvoker",
+        'DgerGen4Error("GEN4_PROTECTED_GTG_RELAY_UNAVAILABLE")',
+        'DgerGen4Error("DELEGATED_CONTEXT_OPERATION_NOT_AUTHORIZED")',
+        'DgerGen4Error("DELEGATED_CONTEXT_CAPABILITY_NOT_AUTHORIZED")',
+        "expected_operation=operation",
+        'DgerGen4Error("MOH_WRAPPER_OK_MISMATCH")',
+        'DgerGen4Error("MOH_STAGE_CONFLICT")',
+        'DgerGen4Error("GEP_ADMISSION_MISMATCH")',
+        "return Gep14CorrelationPeers(base, InvokerCorrelationReader(invoker))",
+    ):
+        if token not in adapter: fail(f"RUNTIME_PEER_GUARD_MISSING:{token}")
+    if "subprocess.Popen" in adapter:
+        fail("RUNTIME_PEER_DIRECT_PROCESS_START_FORBIDDEN")
+
     staging = next((x for x in surfaces if x.get("id") == "gen4-moh-staging"), None)
     if not isinstance(staging, dict) or staging.get("class") != "GEN4_MOH_STAGING_PREPARATION":
         fail("STAGING_SURFACE_CLASS")
@@ -104,6 +127,15 @@ def main() -> int:
     execution = next((x for x in surfaces if x.get("id") == "gen4-moh-effect-port"), None)
     if not isinstance(execution, dict) or "INVALID_EXECUTE_RESPONSE" not in str(execution.get("mechanical_guard", "")):
         fail("EXECUTE_INVALID_RESPONSE_GUARD")
+    production = next((x for x in surfaces if x.get("id") == "gen4-production-peer-adapter"), None)
+    if (
+        not isinstance(production, dict)
+        or production.get("path") != "src/dger/gen4_runtime_peers.py"
+        or production.get("class") != "PRODUCTION_PEER_ADAPTER"
+        or "FAIL_CLOSED" not in str(production.get("post_gen4_status", ""))
+        or "EXECUTION_RELAY" not in str(production.get("mechanical_guard", ""))
+    ):
+        fail("PRODUCTION_PEER_SURFACE_INVALID")
 
     # Mechanically enumerate process-start/semantic execute primitives in DGER Python.
     findings: list[str] = []
@@ -111,10 +143,19 @@ def main() -> int:
         text = path.read_text("utf-8")
         if "subprocess.Popen" in text or '"execute"' in text or ".moh_execute(" in text:
             findings.append(path.relative_to(ROOT).as_posix())
-    allowed = {"src/dger/relay_moh_invoke.py", "src/dger/gen4_effect.py"}
+    allowed = {
+        "src/dger/relay_moh_invoke.py",
+        "src/dger/gen4_effect.py",
+        "src/dger/gen4_runtime_peers.py",
+    }
     unexpected = set(findings) - allowed
     if unexpected: fail("UNDECLARED_EXECUTION_PRIMITIVE:" + ",".join(sorted(unexpected)))
-    declared_exec_paths = {x["path"] for x in surfaces if x["class"] in {"LEGACY_MOH_EXECUTION_EFFECT", "GEN4_MOH_EXECUTION_EFFECT"}}
+    if set(findings) != allowed:
+        fail("EXPECTED_EXECUTION_PRIMITIVE_MISSING:" + ",".join(sorted(allowed - set(findings))))
+    declared_exec_paths = {
+        x["path"] for x in surfaces
+        if x["class"] in {"LEGACY_MOH_EXECUTION_EFFECT", "GEN4_MOH_EXECUTION_EFFECT", "PRODUCTION_PEER_ADAPTER"}
+    }
     if not allowed <= declared_exec_paths: fail("EXECUTION_PRIMITIVE_NOT_INVENTORIED")
 
     print(json.dumps({"ok": True, "schema": value["schema"], "surface_count": len(surfaces), "execution_primitive_paths": sorted(findings)}, sort_keys=True))
