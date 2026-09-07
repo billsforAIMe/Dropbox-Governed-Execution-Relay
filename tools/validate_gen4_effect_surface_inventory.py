@@ -4,6 +4,8 @@ import ast
 import json
 from pathlib import Path
 
+from dger_execution_surface_scan import SEMANTIC_EXECUTE_ALLOWLIST, scan_execution_call_sites
+
 ROOT = Path(__file__).resolve().parents[1]
 INV = ROOT / "GOVERNED_EFFECT_SURFACE_INVENTORY.json"
 
@@ -116,8 +118,6 @@ def main() -> int:
         "return Gep14CorrelationPeers(base, InvokerCorrelationReader(invoker))",
     ):
         if token not in adapter: fail(f"RUNTIME_PEER_GUARD_MISSING:{token}")
-    if "subprocess.Popen" in adapter:
-        fail("RUNTIME_PEER_DIRECT_PROCESS_START_FORBIDDEN")
 
     staging = next((x for x in surfaces if x.get("id") == "gen4-moh-staging"), None)
     if not isinstance(staging, dict) or staging.get("class") != "GEN4_MOH_STAGING_PREPARATION":
@@ -137,28 +137,35 @@ def main() -> int:
     ):
         fail("PRODUCTION_PEER_SURFACE_INVALID")
 
-    # Mechanically enumerate process-start/semantic execute primitives in DGER Python.
-    findings: list[str] = []
-    for path in sorted((ROOT / "src/dger").glob("*.py")):
-        text = path.read_text("utf-8")
-        if "subprocess.Popen" in text or '"execute"' in text or ".moh_execute(" in text:
-            findings.append(path.relative_to(ROOT).as_posix())
-    allowed = {
-        "src/dger/relay_moh_invoke.py",
-        "src/dger/gen4_effect.py",
-        "src/dger/gen4_runtime_peers.py",
-    }
-    unexpected = set(findings) - allowed
-    if unexpected: fail("UNDECLARED_EXECUTION_PRIMITIVE:" + ",".join(sorted(unexpected)))
-    if set(findings) != allowed:
-        fail("EXPECTED_EXECUTION_PRIMITIVE_MISSING:" + ",".join(sorted(allowed - set(findings))))
+    try:
+        process_calls, semantic_calls = scan_execution_call_sites(ROOT)
+    except (OSError, SyntaxError, ValueError) as exc:
+        fail("EXECUTION_SURFACE_SCAN_FAILED:" + str(exc))
+    if process_calls:
+        rendered = ";".join(f"{p}:{q}:{t}:{n}" for p, q, t, n in process_calls)
+        fail("DIRECT_PROCESS_START_FORBIDDEN:" + rendered)
+    semantic_set = {(p, q, t) for p, q, t, _ in semantic_calls}
+    unexpected = semantic_set - SEMANTIC_EXECUTE_ALLOWLIST
+    missing = SEMANTIC_EXECUTE_ALLOWLIST - semantic_set
+    if unexpected:
+        fail("UNDECLARED_SEMANTIC_EXECUTION:" + ";".join(":".join(x) for x in sorted(unexpected)))
+    if missing:
+        fail("EXPECTED_SEMANTIC_EXECUTION_MISSING:" + ";".join(":".join(x) for x in sorted(missing)))
     declared_exec_paths = {
         x["path"] for x in surfaces
         if x["class"] in {"LEGACY_MOH_EXECUTION_EFFECT", "GEN4_MOH_EXECUTION_EFFECT", "PRODUCTION_PEER_ADAPTER"}
     }
-    if not allowed <= declared_exec_paths: fail("EXECUTION_PRIMITIVE_NOT_INVENTORIED")
+    expected_declared = {p for p, _, _ in SEMANTIC_EXECUTE_ALLOWLIST}
+    if not expected_declared <= declared_exec_paths:
+        fail("EXECUTION_PRIMITIVE_NOT_INVENTORIED")
 
-    print(json.dumps({"ok": True, "schema": value["schema"], "surface_count": len(surfaces), "execution_primitive_paths": sorted(findings)}, sort_keys=True))
+    print(json.dumps({
+        "ok": True,
+        "schema": value["schema"],
+        "surface_count": len(surfaces),
+        "process_start_call_sites": process_calls,
+        "semantic_execution_call_sites": semantic_calls,
+    }, sort_keys=True))
     return 0
 
 
