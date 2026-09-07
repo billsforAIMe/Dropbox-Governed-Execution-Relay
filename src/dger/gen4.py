@@ -11,6 +11,10 @@ from .gen4_delegation import (
     delegated_service_context_to_dict, parse_delegated_service_context,
     require_protected_service_match,
 )
+from .gen4_gep14_correlation import (
+    AHC_EFFECT_READ_OPERATION, CHM_HANDOFF_READ_OPERATION, GEP_CORRELATION_OPERATION,
+    AuthenticatedCorrelationReader, AuthenticatedPeerRead, Gep14CorrelationPeers,
+)
 from .gen4_state import Gen4StateMixin
 from .gen4_effect import Gen4EffectMixin
 from .gen4_driver import Gen4DriverMixin
@@ -21,9 +25,11 @@ class Gen4Relay(Gen4DriverMixin, Gen4EffectMixin, Gen4StateMixin):
 
 
 __all__ = [
-    "Ack", "AhcObservation", "DELEGATED_AUTHORIZATION_RULE", "DELEGATED_SERVICE_CONTEXT_ISSUER",
-    "DELEGATED_SERVICE_CONTEXT_SCHEMA", "DgerGen4Error", "DelegatedServiceContext",
-    "EXECUTION_RELAY_ROLE", "Gen4Peers", "Gen4Relay", "InvocationEvidence", "MohObservation",
+    "AHC_EFFECT_READ_OPERATION", "Ack", "AhcObservation", "AuthenticatedCorrelationReader",
+    "AuthenticatedPeerRead", "CHM_HANDOFF_READ_OPERATION", "DELEGATED_AUTHORIZATION_RULE",
+    "DELEGATED_SERVICE_CONTEXT_ISSUER", "DELEGATED_SERVICE_CONTEXT_SCHEMA", "DgerGen4Error",
+    "DelegatedServiceContext", "EXECUTION_RELAY_ROLE", "GEP_CORRELATION_OPERATION",
+    "Gen4Peers", "Gen4Relay", "Gep14CorrelationPeers", "InvocationEvidence", "MohObservation",
     "REQUEST_SCHEMA", "READY_SCHEMA", "RESULT_SCHEMA", "SERVICE_IDENTITY_SCHEMA", "ServiceIdentity",
     "StageReceipt", "TrustedCorrelation", "TrustedOrigin", "UnavailableGen4Peers", "canonical_bytes",
     "canonical_digest", "canonical_file_bytes", "delegated_service_context_to_dict",
