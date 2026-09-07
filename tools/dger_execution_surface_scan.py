@@ -20,6 +20,17 @@ SEMANTIC_EXECUTE_ALLOWLIST = {
     ("src/dger/gen4_runtime_peers.py", "Gen4RuntimePeers.moh_execute", "self._invoke"),
 }
 
+PROCESS_ALIAS_NAMESPACES = {"importlib"}
+for _target in PROCESS_START_TARGETS:
+    _parts = _target.split(".")
+    for _index in range(1, len(_parts)):
+        PROCESS_ALIAS_NAMESPACES.add(".".join(_parts[:_index]))
+for _prefix in PROCESS_START_PREFIXES:
+    _parts = _prefix.split(".")
+    for _index in range(1, len(_parts)):
+        PROCESS_ALIAS_NAMESPACES.add(".".join(_parts[:_index]))
+DYNAMIC_PROCESS_CALLABLE = "<dynamic-process-callable>"
+
 
 def _raw_target(node: ast.AST) -> str | None:
     if isinstance(node, ast.Name):
@@ -34,18 +45,34 @@ def _constant_string(node: ast.AST) -> str | None:
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
+def _is_process_target(target: str) -> bool:
+    return (
+        target == DYNAMIC_PROCESS_CALLABLE
+        or target in PROCESS_START_TARGETS
+        or any(target.startswith(prefix) for prefix in PROCESS_START_PREFIXES)
+    )
+
+
+def _is_interesting_alias_fact(target: str) -> bool:
+    return target in PROCESS_ALIAS_NAMESPACES or target == "importlib.import_module" or _is_process_target(target)
+
+
 def _import_aliases(tree: ast.AST) -> dict[str, set[str]]:
     aliases: dict[str, set[str]] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for item in node.names:
                 local = item.asname or item.name.split(".", 1)[0]
-                aliases.setdefault(local, set()).add(item.name)
+                canonical = item.name if item.asname else item.name.split(".", 1)[0]
+                if _is_interesting_alias_fact(canonical):
+                    aliases.setdefault(local, set()).add(canonical)
         elif isinstance(node, ast.ImportFrom) and node.module:
             for item in node.names:
                 if item.name == "*":
                     continue
-                aliases.setdefault(item.asname or item.name, set()).add(f"{node.module}.{item.name}")
+                canonical = f"{node.module}.{item.name}"
+                if _is_interesting_alias_fact(canonical):
+                    aliases.setdefault(item.asname or item.name, set()).add(canonical)
     return aliases
 
 
@@ -58,6 +85,49 @@ def _assignment_names(node: ast.AST) -> list[str]:
             out.extend(_assignment_names(item))
         return out
     return []
+
+
+def _alias_value_facts(node: ast.AST, aliases: dict[str, set[str]]) -> set[str]:
+    if isinstance(node, ast.Name):
+        return set(aliases.get(node.id, ()))
+    if isinstance(node, ast.Attribute):
+        out: set[str] = set()
+        for base in _alias_value_facts(node.value, aliases):
+            if base not in PROCESS_ALIAS_NAMESPACES:
+                continue
+            candidate = f"{base}.{node.attr}"
+            if _is_interesting_alias_fact(candidate):
+                out.add(candidate)
+        return out
+    if isinstance(node, ast.Call):
+        raw = _raw_target(node.func)
+        if raw == "__import__" and node.args:
+            module = _constant_string(node.args[0])
+            if module and _is_interesting_alias_fact(module):
+                return {module}
+            return set()
+        resolved_func = _alias_value_facts(node.func, aliases)
+        if "importlib.import_module" in resolved_func and node.args:
+            module = _constant_string(node.args[0])
+            if module and _is_interesting_alias_fact(module):
+                return {module}
+            return set()
+        if raw == "getattr" and len(node.args) >= 2:
+            bases = _alias_value_facts(node.args[0], aliases)
+            attr = _constant_string(node.args[1])
+            if attr is None:
+                if any(base in PROCESS_ALIAS_NAMESPACES for base in bases):
+                    return {DYNAMIC_PROCESS_CALLABLE}
+                return set()
+            out: set[str] = set()
+            for base in bases:
+                if base not in PROCESS_ALIAS_NAMESPACES:
+                    continue
+                candidate = f"{base}.{attr}"
+                if _is_interesting_alias_fact(candidate):
+                    out.add(candidate)
+            return out
+    return set()
 
 
 def _resolve_value_targets(node: ast.AST, aliases: dict[str, set[str]]) -> set[str]:
@@ -111,21 +181,23 @@ def _symbol_aliases(tree: ast.AST) -> dict[str, set[str]]:
             if names:
                 assignments.append((names, node.value))
 
-    # Conservative fixed point: once a symbol is known to have referenced a process
-    # callable, later rebinding never erases that fact. This intentionally favors
-    # false-positive review over an execution-surface false negative.
+    # Finite dataflow lattice: only canonical namespace/process-callable facts can
+    # propagate. Attribute derivation is allowed only from namespace facts, never
+    # from a previously derived callable. Therefore same-symbol rebinding such as
+    # `runner = runner.run` can add `subprocess.run` once but cannot synthesize an
+    # unbounded `subprocess.run.run...` chain.
     changed = True
     while changed:
         changed = False
         for names, value in assignments:
-            resolved = _resolve_value_targets(value, aliases)
+            resolved = _alias_value_facts(value, aliases)
             if not resolved:
                 continue
             for name in names:
                 bucket = aliases.setdefault(name, set())
-                before = len(bucket)
-                bucket.update(resolved)
-                if len(bucket) != before:
+                additions = resolved - bucket
+                if additions:
+                    bucket.update(additions)
                     changed = True
     return aliases
 
@@ -137,10 +209,6 @@ def _expr_marker(node: ast.AST) -> str | None:
     if isinstance(node, ast.Name):
         return node.id
     return _raw_target(node)
-
-
-def _is_process_target(target: str) -> bool:
-    return target in PROCESS_START_TARGETS or any(target.startswith(prefix) for prefix in PROCESS_START_PREFIXES)
 
 
 def _is_semantic_execute_call(call: ast.Call, raw_target: str | None) -> bool:
