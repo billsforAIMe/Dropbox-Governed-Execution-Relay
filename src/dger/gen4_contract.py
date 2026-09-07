@@ -344,7 +344,7 @@ def _validate_correlation(c: TrustedCorrelation, request: dict[str, Any], admiss
     # blocker for a production establish_correlation adapter.
     required_pairs = {(AHC_TOOL_ID, "effect_read")}
     if c.chm_handoff_id is not None:
-        required_pairs.add((CHM_TOOL_ID, "handoff_get"))
+        required_pairs.add((CHM_TOOL_ID, "handoff_read"))
     if {(item.tool_id, item.operation) for item in evidence} != required_pairs:
         raise DgerGen4Error("TRUSTED_CORRELATION_PROVIDER_SET_INVALID")
 
