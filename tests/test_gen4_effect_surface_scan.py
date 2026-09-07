@@ -93,6 +93,20 @@ class ExecutionSurfaceScannerTests(unittest.TestCase):
             process,
         )
 
+    def test_same_symbol_module_to_callable_rebinding_terminates_and_detects_call(self):
+        process, _ = self._scan({
+            "src/dger/rogue.py": (
+                "import subprocess as runner\n"
+                "runner = runner.run\n"
+                "runner(['/bin/echo', 'x'])\n"
+            )
+        })
+        self.assertIn(
+            ("src/dger/rogue.py", "<module>", "subprocess.run", 3),
+            process,
+        )
+        self.assertFalse(any("subprocess.run.run" in row[2] for row in process))
+
     def test_direct_process_start_in_runtime_adapter_is_detected(self):
         process, _ = self._scan({
             "src/dger/gen4_runtime_peers.py": "import os\ndef bad():\n    os.system('x')\n"
