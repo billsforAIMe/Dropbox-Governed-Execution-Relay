@@ -1,7 +1,7 @@
 {
   "schema": "governed-effect-surface-inventory/v1",
   "tool_id": "dropbox-governed-execution-relay",
-  "inventory_version": "gen4-source-candidate-3",
+  "inventory_version": "gen4-source-candidate-4",
   "effect_family": "asynchronous-mac-execution-relay",
   "surfaces": [
     {
@@ -94,11 +94,11 @@
     },
     {
       "id": "gen4-production-peer-adapter",
-      "path": "src/dger/gen4_contract.py",
-      "symbols": ["UnavailableGen4Peers"],
+      "path": "src/dger/gen4_runtime_peers.py",
+      "symbols": ["Gen4RuntimePeers", "InvokerCorrelationReader", "UnavailableAuthenticatedPeerInvoker", "compose_gen4_peers"],
       "class": "PRODUCTION_PEER_ADAPTER",
-      "post_gen4_status": "FAIL_CLOSED_PENDING_EXACT_PEER_TUPLE",
-      "mechanical_guard": "GEN4_PEER_CONTRACTS_UNAVAILABLE; delivered adapter must establish delegated actor context, current-compatible peer calls, and exact operation-bound invocation-time provider evidence"
+      "post_gen4_status": "SOURCE_READY_PREACTIVATION_FAIL_CLOSED_WITHOUT_PROTECTED_INVOKER",
+      "mechanical_guard": "protected DGER EXECUTION_RELAY service identity + exact delegated origin/service/operation/capability match + exact invocation-time provider evidence; GEP/AHC/CHM correlation remains READ-only and source-delivered; MOH execute remains behind AHC IN_DOUBT/status/WAL ordering; unavailable protected invoker fails closed before MOH materialization; no launcher or activation wiring is changed"
     },
     {
       "id": "deployment-admin",
