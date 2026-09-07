@@ -194,12 +194,21 @@ class Gen4RuntimePeerCompositionTests(unittest.TestCase):
         self.assertEqual(relay._load_state("dger-001")["phase"], "INGRESS_FROZEN")
         self.assertFalse((self.moh / "inbox" / EXECUTION).exists())
 
-    def test_wrong_origin_on_ahc_begin_never_calls_moh(self):
+    def test_wrong_origin_on_ahc_begin_response_is_reconciled_before_moh(self):
         self.invoker.wrong_origin_operation = AHC_BEGIN_OPERATION
         self.assertTrue(self.relay.process_one(self.package))
-        self.assertEqual(self.relay._load_state("dger-001")["phase"], "AHC_BEGIN_RECONCILE")
+        self.assertEqual(self.relay._load_state("dger-001")["phase"], "DONE")
+        self.assertEqual(self.invoker.execute_calls, 1)
+        operations = [op for _, op, _, _ in self.invoker.calls]
+        self.assertLess(operations.index(AHC_BEGIN_OPERATION), operations.index(AHC_STATUS_OPERATION))
+        self.assertLess(operations.index(AHC_STATUS_OPERATION), operations.index(MOH_STATUS_OPERATION))
+
+    def test_wrong_origin_on_correlation_read_fails_before_moh(self):
+        self.invoker.wrong_origin_operation = GEP_CORRELATION_OPERATION
+        self.assertTrue(self.relay.process_one(self.package))
+        self.assertEqual(self.relay._load_state("dger-001")["phase"], "INGRESS_FROZEN")
         self.assertEqual(self.invoker.execute_calls, 0)
-        self.assertFalse(any(tool == MOH for tool, _, _, _ in self.invoker.calls))
+        self.assertFalse((self.moh / "inbox" / EXECUTION).exists())
 
     def test_moh_wrapper_truth_mismatch_blocks_execute(self):
         self.invoker.bad_moh_ok = True
