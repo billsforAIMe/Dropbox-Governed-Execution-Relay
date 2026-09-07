@@ -256,7 +256,7 @@ class Gen4EffectMixin:
         except Exception as exc:
             self._record_error(state, "chm_publish_terminal", exc); self._save_state(rid, state); self._status(rid, "CHM_PUBLICATION_BLOCKED", code=self._error_code(exc)); return
         try:
-            _validate_ack(ack, CHM_TOOL_ID, "handoff_attach_result")
+            _validate_ack(ack, CHM_TOOL_ID, "publish_terminal_result")
         except DgerGen4Error:
             state["phase"] = "CHM_RESULT_CONFLICT"; self._save_state(rid, state); raise
         state["chm_terminal_ack"] = asdict(ack)
