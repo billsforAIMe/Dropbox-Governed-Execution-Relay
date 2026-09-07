@@ -1,0 +1,110 @@
+#!/bin/bash -p
+PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin
+export PATH
+IFS=$' \t\n'
+unset BASH_ENV ENV CDPATH GLOBIGNORE 2>/dev/null || true
+set -euo pipefail
+umask 077
+
+MAIN='66056fb7e5a545a6f9532ed00d13008ce0bd2db4'
+CANDIDATE='PENDING'
+TREE='PENDING'
+BRANCH='builder/gen4-runtime-composition'
+REPO='https://github.com/billsforAIMe/Dropbox-Governed-Execution-Relay.git'
+PYRUNWAY='/usr/local/bin/pyrunway'
+STAMP="$(/bin/date -u +%Y%m%dT%H%M%SZ)"
+OUT="$HOME/Library/CloudStorage/Dropbox/Software/NSP - Temporary Files/Post94 Cross-Tool Status"
+[ -d "$OUT" ] || OUT="$HOME/Dropbox/Software/NSP - Temporary Files/Post94 Cross-Tool Status"
+[ -d "$OUT" ] || OUT="$HOME/Downloads"
+LOG="$OUT/DGER_PR18_PYRUNWAY_QUALIFICATION_${STAMP}.log"
+WORK="$(/usr/bin/mktemp -d /private/tmp/dger-pr18-qual.XXXXXX)"
+finish() {
+  rc=$?
+  trap - EXIT INT TERM HUP
+  /bin/rm -rf "$WORK" 2>/dev/null || true
+  if [ "$rc" -eq 0 ]; then echo 'DGER_PR18_PYRUNWAY_QUALIFICATION_PASS'; else echo "DGER_PR18_PYRUNWAY_QUALIFICATION_FAIL rc=$rc"; fi
+  echo "RESULT_LOG=$LOG"
+  exit "$rc"
+}
+trap finish EXIT INT TERM HUP
+exec > >(/usr/bin/tee -a "$LOG") 2>&1
+
+echo "START_UTC=$STAMP"
+echo "EXPECTED_MAIN=$MAIN"
+echo "QUALIFIED_CANDIDATE=$CANDIDATE"
+echo "QUALIFIED_TREE=$TREE"
+echo 'CORRECTION_SCOPE=INVENTORY_DECLARATION_PLUS_INHERITED_RELEASE_VALIDATOR_LITERAL_ONLY'
+echo 'CLAIM_SCOPE=BUILDER_CHANGED_PROPOSITION_ASSURANCE_ONLY'
+echo 'DEPLOYMENT_ACTIVATION_REGISTRY_RUNTIME=NOT_CLAIMED'
+
+[ -x "$PYRUNWAY" ] || { echo 'PYRUNWAY_ENVIRONMENT_UNAVAILABLE'; exit 69; }
+DESC="$($PYRUNWAY --describe)" || { echo 'PYRUNWAY_ENVIRONMENT_UNAVAILABLE'; exit 69; }
+CONTRACT="$($PYRUNWAY --contract)" || { echo 'PYRUNWAY_ENVIRONMENT_UNAVAILABLE'; exit 69; }
+printf '%s\n' "$DESC" | /usr/bin/grep -F '"name":"pyrunway"' >/dev/null
+printf '%s\n' "$DESC" | /usr/bin/grep -F '"version":"1.2"' >/dev/null
+printf '%s\n' "$CONTRACT" | /usr/bin/grep -F '"standalone-isolated"' >/dev/null
+printf '%s\n' "$CONTRACT" | /usr/bin/grep -F '"ambient_python_fallback": false' >/dev/null
+echo "PYRUNWAY_DESCRIBE=$DESC"
+echo 'PYRUNWAY_RUNTIME_BINDING=PASS'
+
+/bin/mkdir -p "$WORK/repo"
+/usr/bin/git -C "$WORK/repo" init -q
+/usr/bin/git -C "$WORK/repo" remote add origin "$REPO"
+/usr/bin/git -C "$WORK/repo" fetch -q --no-tags --depth=100 origin \
+  '+refs/heads/main:refs/remotes/origin/main' \
+  "+refs/heads/$BRANCH:refs/remotes/origin/candidate-tip"
+OBS_MAIN="$(/usr/bin/git -C "$WORK/repo" rev-parse refs/remotes/origin/main)"
+OBS_TIP="$(/usr/bin/git -C "$WORK/repo" rev-parse refs/remotes/origin/candidate-tip)"
+[ "$OBS_MAIN" = "$MAIN" ] || { echo "DGER_MAIN_MOVED_REASSESS observed=$OBS_MAIN"; exit 75; }
+[ "$OBS_TIP" = "$CANDIDATE" ] || { echo "DGER_BRANCH_SOURCE_MOVED_REASSESS head=$OBS_TIP"; exit 75; }
+OBS_TREE="$(/usr/bin/git -C "$WORK/repo" rev-parse "$CANDIDATE^{tree}")"
+[ "$OBS_TREE" = "$TREE" ] || { echo "DGER_CANDIDATE_TREE_MISMATCH observed=$OBS_TREE"; exit 75; }
+/usr/bin/git -C "$WORK/repo" merge-base --is-ancestor "$MAIN" "$CANDIDATE"
+/usr/bin/git -C "$WORK/repo" checkout -q --detach "$CANDIDATE"
+/usr/bin/git -C "$WORK/repo" diff --check "$MAIN..$CANDIDATE"
+echo "OBSERVED_MAIN=$OBS_MAIN"
+echo "OBSERVED_BRANCH_TIP=$OBS_TIP"
+echo "OBSERVED_BRANCH_TIP_TREE=$OBS_TREE"
+echo 'EXACT_CORRECTED_CANDIDATE_IDENTITY_ANCESTRY_DIFF=PASS'
+
+cat > "$WORK/qualify.py" <<'PY'
+from pathlib import Path
+import compileall
+import subprocess
+import sys
+import unittest
+root = Path(sys.argv[1]).resolve()
+profile = (root / "PROJECT_GOVERNANCE_PROFILE.md").read_text("utf-8")
+validator = (root / "tools/validate_gen4_release.py").read_text("utf-8")
+if "Generation-3 runtime to remain installed before secure cutover" not in profile:
+    raise SystemExit("PREACTIVATION_PROFILE_PROPOSITION_MISSING")
+if '"Generation-3 runtime to remain installed"' not in validator:
+    raise SystemExit("RELEASE_VALIDATOR_LITERAL_CORRECTION_MISSING")
+print("DGER_INHERITED_RELEASE_VALIDATOR_LITERAL_BINDING_PASS")
+for name in ("src", "tests", "tools"):
+    if not compileall.compile_dir(root / name, quiet=1, force=True):
+        raise SystemExit(f"COMPILEALL_FAIL:{name}")
+print("DGER_COMPILEALL_PASS")
+sys.path.insert(0, str(root / "src"))
+sys.path.insert(0, str(root / "tests"))
+suite = unittest.TestSuite()
+for name in (
+    "test_gen4_runtime_peers",
+    "test_gen4_gep14_correlation",
+    "test_gen4_provider_evidence",
+    "test_gen4_delegation",
+    "test_gen4_chm_relay_contract",
+    "test_gen4_effect_surface_scan",
+):
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromName(name))
+result = unittest.TextTestRunner(verbosity=2).run(suite)
+if not result.wasSuccessful():
+    raise SystemExit(1)
+for tool in ("validate_gen4_effect_surface_inventory.py", "validate_gen4_release.py"):
+    subprocess.run([sys.executable, str(root / "tools" / tool)], cwd=root, check=True)
+print("DGER_PR18_CHANGED_PROPOSITION_PASS")
+PY
+/bin/chmod 600 "$WORK/qualify.py"
+"$PYRUNWAY" --standalone "$WORK/qualify.py" "$WORK/repo"
+echo 'GOVERNED_CHANGED_PROPOSITION_ASSURANCE=PASS'
+echo "END_UTC=$(/bin/date -u +%Y%m%dT%H%M%SZ)"
