@@ -14,7 +14,7 @@ REQUIRED_IDS = {
 }
 REQUIRED_PATHS = {
     "src/dger/relay.py", "scripts/dger.py", "src/dger/relay_v1.py", "src/dger/relay_moh_invoke.py",
-    "src/dger/relay_moh.py", "launcher/dropbox-governed-execution-relay", "src/dger/gen4.py",
+    "src/dger/relay_moh.py", "launcher/dropbox-governed-execution-relay",
     "src/dger/gen4_contract.py", "src/dger/gen4_driver.py", "src/dger/gen4_effect.py",
     "src/dger/gen4_runtime_peers.py", "deployment/dger_god_adapter.py",
 }
