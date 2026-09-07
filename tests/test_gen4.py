@@ -130,7 +130,10 @@ class FakePeers:
         if self.omit_correlation_evidence:
             evidence = ()
         else:
-            items = [self._evidence("autonomous-handoff-coordinator", "effect_read")]
+            items = [
+                self._evidence("governed-execution-platform", "correlation_read"),
+                self._evidence("autonomous-handoff-coordinator", "effect_read"),
+            ]
             if values["chm_handoff_id"] is not None:
                 items.append(self._evidence("common-handoff-manager", "handoff_read"))
             evidence = tuple(items)
@@ -283,7 +286,10 @@ class Gen4Tests(unittest.TestCase):
         self.assertEqual(self.peers.process_starts, 1)
         self.assertEqual(self.peers.stage_admission, b"signed-admission-v1")
         providers = {item["tool_id"] for item in s["trusted_correlation"]["provider_evidence"]}
-        self.assertEqual(providers, {"autonomous-handoff-coordinator", "common-handoff-manager"})
+        self.assertEqual(
+            providers,
+            {"governed-execution-platform", "autonomous-handoff-coordinator", "common-handoff-manager"},
+        )
         self.assertEqual(s["trusted_correlation"]["origin"]["actor_role"], "BUILDER")
         self.assertEqual(s["trusted_correlation"]["service_principal_id"], "dger-service")
         self.assertEqual(s["trusted_correlation"]["service_role"], "EXECUTION_RELAY")
