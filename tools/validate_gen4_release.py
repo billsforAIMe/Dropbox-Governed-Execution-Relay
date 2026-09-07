@@ -42,7 +42,7 @@ def main() -> int:
         if token not in protocol: fail(f"PROTOCOL_TOKEN:{token}")
     for token in ("Generation 4", "EXECUTION_RELAY", "UnavailableGen4Peers", "Generation-3 runtime to remain installed"):
         if token not in profile: fail(f"PROFILE_TOKEN:{token}")
-    for token in ("Generation 4", "pre-activation", "Gen4 activation"):
+    for token in ("Generation 4", "Pre-activation", "Gen4 activation"):
         if token not in binding: fail(f"BINDING_TOKEN:{token}")
     if not readme.startswith("# Dropbox Governed Execution Relay — Generation 4 source release") or "Prototype R0" not in readme or "permanently retired" not in readme:
         fail("README_GENERATION")
