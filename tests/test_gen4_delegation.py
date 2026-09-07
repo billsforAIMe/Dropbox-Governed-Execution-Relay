@@ -51,8 +51,8 @@ def valid_context() -> dict:
         "service_deployment_id": "dger-deployment-A",
         "delegation_invocation_id": "gtg_del_" + "3" * 64,
         "authorized_operations": [
-            "tool:common-handoff-manager:handoff_attach_result",
-            "tool:common-handoff-manager:handoff_get",
+            "tool:common-handoff-manager:handoff_read",
+            "tool:common-handoff-manager:publish_terminal_result",
         ],
         "authorized_capability_classes": ["EFFECT", "READ"],
         "project_binding": "ai-me",
@@ -78,8 +78,8 @@ class DelegatedServiceContextTests(unittest.TestCase):
         self.assertEqual(
             context.authorized_operations,
             (
-                "tool:common-handoff-manager:handoff_attach_result",
-                "tool:common-handoff-manager:handoff_get",
+                "tool:common-handoff-manager:handoff_read",
+                "tool:common-handoff-manager:publish_terminal_result",
             ),
         )
         self.assertFalse(hasattr(delegation, "authorize"))
