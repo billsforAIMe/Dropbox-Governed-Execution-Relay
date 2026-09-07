@@ -16,6 +16,7 @@ PROCESS_START_PREFIXES = ("os.spawn", "os.exec", "posix.spawn", "posix.exec")
 SEMANTIC_EXECUTE_ALLOWLIST = {
     ("src/dger/relay_moh_invoke.py", "RelayMohInvokeMixin._invoke_moh", "self.gateway.invoke"),
     ("src/dger/gen4_effect.py", "Gen4EffectMixin._execute_moh", "self.peers.moh_execute"),
+    ("src/dger/gen4_gep14_correlation.py", "Gep14CorrelationPeers.moh_execute", "self._base.moh_execute"),
     ("src/dger/gen4_runtime_peers.py", "Gen4RuntimePeers._invoke", "self.invoker.invoke"),
     ("src/dger/gen4_runtime_peers.py", "Gen4RuntimePeers.moh_execute", "self._invoke"),
 }
