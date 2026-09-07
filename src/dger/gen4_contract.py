@@ -118,12 +118,12 @@ class Gen4Peers(Protocol):
     return exact invocation-time GTG provider identity evidence bound to the exact
     normalized operation DGER requested.
 
-    ``establish_correlation`` may consume only delivered peer source contracts. The
-    current authoritative GEP source does not expose the post-#94 trusted execution-
-    binding/correlation operation DGER ultimately requires, so a production adapter
-    must remain unavailable rather than inventing ``correlation_read`` or an alias.
-    AHC's five DGER effect semantics, by contrast, are source-delivered and may be
-    composed even while their runtime front door remains unavailable.
+    ``establish_correlation`` may consume only delivered peer source contracts.
+    Authoritative GEP Gen14 now exposes the exact ``correlation_read`` READ needed to
+    bind the existing trusted execution/request/admission to the non-transferable GTG
+    origin. A production correlation adapter therefore composes that GEP truth with
+    AHC ``effect_read`` and optional CHM ``handoff_read``; runtime callability and
+    activation remain separate propositions.
 
     ``stage_moh`` is deliberately different: in this source-ready pre-activation
     contract it is only local, non-effectful materialization of already authenticated
@@ -338,11 +338,13 @@ def _validate_correlation(c: TrustedCorrelation, request: dict[str, Any], admiss
     invocation_ids = [item.invocation_id for item in evidence]
     if len(invocation_ids) != len(set(invocation_ids)):
         raise DgerGen4Error("GTG_INVOCATION_EVIDENCE_DUPLICATE")
-    # Require only exact source-delivered semantic operations. Authoritative GEP Gen13
-    # has no post-#94 trusted correlation-read operation, so DGER deliberately does
-    # not invent one here. That missing GEP source contract remains the narrow source
-    # blocker for a production establish_correlation adapter.
-    required_pairs = {(AHC_TOOL_ID, "effect_read")}
+    # Correlation is now a three-owner composition: GEP owns immutable execution /
+    # request / admission truth, AHC owns consequential-effect truth, and optional
+    # CHM contributes only non-entitling handoff correlation.
+    required_pairs = {
+        (GEP_TOOL_ID, "correlation_read"),
+        (AHC_TOOL_ID, "effect_read"),
+    }
     if c.chm_handoff_id is not None:
         required_pairs.add((CHM_TOOL_ID, "handoff_read"))
     if {(item.tool_id, item.operation) for item in evidence} != required_pairs:
