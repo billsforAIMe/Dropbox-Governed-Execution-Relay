@@ -132,7 +132,7 @@ class FakePeers:
         else:
             items = [self._evidence("autonomous-handoff-coordinator", "effect_read")]
             if values["chm_handoff_id"] is not None:
-                items.append(self._evidence("common-handoff-manager", "handoff_get"))
+                items.append(self._evidence("common-handoff-manager", "handoff_read"))
             evidence = tuple(items)
         body = {
             "origin": asdict(self.origin),
@@ -254,7 +254,7 @@ class FakePeers:
         if self.chm_error:
             raise self.chm_error
         self.chm_acks += 1
-        return Ack(True, "9" * 64, self._evidence("common-handoff-manager", "handoff_attach_result"))
+        return Ack(True, "9" * 64, self._evidence("common-handoff-manager", "publish_terminal_result"))
 
 
 class Gen4Tests(unittest.TestCase):
