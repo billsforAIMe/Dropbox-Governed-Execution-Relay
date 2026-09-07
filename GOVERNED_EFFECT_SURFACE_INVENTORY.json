@@ -1,7 +1,7 @@
 {
   "schema": "governed-effect-surface-inventory/v1",
   "tool_id": "dropbox-governed-execution-relay",
-  "inventory_version": "gen4-source-candidate-4",
+  "inventory_version": "gen4-source-candidate-5",
   "effect_family": "asynchronous-mac-execution-relay",
   "surfaces": [
     {
@@ -75,6 +75,14 @@
       "class": "GEN4_MOH_EXECUTION_EFFECT",
       "post_gen4_status": "SOURCE_READY_PREACTIVATION",
       "mechanical_guard": "PRE_AHC_EXECUTE_WAL + authenticated AHC IN_DOUBT + MOH status proof + MOH execute-call WAL + exact invocation-time MOH provider evidence bound to operation + INVALID_EXECUTE_RESPONSE monotonic no-repeat latch"
+    },
+    {
+      "id": "gen4-gep14-execution-delegation",
+      "path": "src/dger/gen4_gep14_correlation.py",
+      "symbols": ["Gep14CorrelationPeers.moh_execute"],
+      "class": "GEN4_MOH_EXECUTION_EFFECT",
+      "post_gen4_status": "SOURCE_READY_PREACTIVATION",
+      "mechanical_guard": "moh_execute delegates unchanged to the base Gen4Peers implementation; the correlation wrapper cannot alter AHC/MOH/CHM effect ordering or recovery semantics; no direct process start is added and exact base invocation-time provider evidence remains required"
     },
     {
       "id": "gen4-ahc-effect-port",

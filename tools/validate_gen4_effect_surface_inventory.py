@@ -11,14 +11,15 @@ INV = ROOT / "GOVERNED_EFFECT_SURFACE_INVENTORY.json"
 
 REQUIRED_IDS = {
     "prototype-r0-library", "gen3-cli", "gen3-library-relay", "gen3-moh-effect", "gen3-recovery",
-    "gen3-launcher", "gen4-library-relay", "gen4-moh-staging", "gen4-moh-effect-port", "gen4-ahc-effect-port",
-    "gen4-chm-history-port", "gen4-production-peer-adapter", "deployment-admin",
+    "gen3-launcher", "gen4-library-relay", "gen4-moh-staging", "gen4-moh-effect-port",
+    "gen4-gep14-execution-delegation", "gen4-ahc-effect-port", "gen4-chm-history-port",
+    "gen4-production-peer-adapter", "deployment-admin",
 }
 REQUIRED_PATHS = {
     "src/dger/relay.py", "scripts/dger.py", "src/dger/relay_v1.py", "src/dger/relay_moh_invoke.py",
     "src/dger/relay_moh.py", "launcher/dropbox-governed-execution-relay",
     "src/dger/gen4_contract.py", "src/dger/gen4_driver.py", "src/dger/gen4_effect.py",
-    "src/dger/gen4_runtime_peers.py", "deployment/dger_god_adapter.py",
+    "src/dger/gen4_gep14_correlation.py", "src/dger/gen4_runtime_peers.py", "deployment/dger_god_adapter.py",
 }
 
 
