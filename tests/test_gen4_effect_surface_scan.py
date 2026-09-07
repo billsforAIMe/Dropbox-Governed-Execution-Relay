@@ -46,12 +46,32 @@ class ExecutionSurfaceScannerTests(unittest.TestCase):
         self.assertIn("pty.spawn", targets)
         self.assertTrue(all(row[0] == "src/dger/nested/rogue.py" for row in process))
 
+    def test_dynamic_process_access_and_process_capable_imports_are_detected(self):
+        process, _ = self._scan({
+            "src/dger/rogue.py": (
+                "import os\n"
+                "from subprocess import *\n"
+                "def bad(name):\n"
+                "    alias = os.system\n"
+                "    getattr(os, 'system')('x')\n"
+                "    getattr(os, name)('x')\n"
+                "    __import__('subprocess')\n"
+                "    alias('x')\n"
+            )
+        })
+        targets = {row[2] for row in process}
+        self.assertIn("os.system", targets)
+        self.assertIn("os.<dynamic>", targets)
+        self.assertIn("dynamic-import:subprocess", targets)
+        self.assertIn("import:subprocess", targets)
+        self.assertIn("import:subprocess.*", targets)
+
     def test_direct_process_start_in_runtime_adapter_is_detected(self):
         process, _ = self._scan({
-            "src/dger/gen4_runtime_peers.py": "import subprocess\ndef bad():\n    subprocess.call(['x'])\n"
+            "src/dger/gen4_runtime_peers.py": "import os\ndef bad():\n    os.system('x')\n"
         })
-        self.assertEqual(1, len(process))
-        self.assertEqual("subprocess.call", process[0][2])
+        self.assertTrue(process)
+        self.assertIn("os.system", {row[2] for row in process})
 
     def test_dynamic_or_explicit_execute_invoke_is_semantic_execution(self):
         _, semantic = self._scan({
@@ -73,13 +93,37 @@ class ExecutionSurfaceScannerTests(unittest.TestCase):
         })
         self.assertEqual([], semantic)
 
+    def test_duplicate_semantic_call_site_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            path = root / "src/dger/rogue.py"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                "def duplicate(g, operation):\n"
+                "    g.invoke('mac-operation-host', operation, {})\n"
+                "    g.invoke('mac-operation-host', operation, {})\n",
+                "utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "DUPLICATE_SEMANTIC_EXECUTION_CALL_SITE"):
+                scan_execution_call_sites(root)
+
+    def test_nested_symlink_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "src/dger"
+            outside = root / "outside"
+            source.mkdir(parents=True)
+            outside.mkdir()
+            (source / "link").symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "UNSAFE_SOURCE_PATH"):
+                scan_execution_call_sites(root)
+
     def test_repository_has_no_direct_process_start_and_exact_semantic_allowlist(self):
         process, semantic = scan_execution_call_sites(ROOT)
+        triples = [(path, qualname, target) for path, qualname, target, _ in semantic]
         self.assertEqual([], process)
-        self.assertEqual(
-            SEMANTIC_EXECUTE_ALLOWLIST,
-            {(path, qualname, target) for path, qualname, target, _ in semantic},
-        )
+        self.assertEqual(len(SEMANTIC_EXECUTE_ALLOWLIST), len(triples))
+        self.assertEqual(SEMANTIC_EXECUTE_ALLOWLIST, set(triples))
 
 
 if __name__ == "__main__":
