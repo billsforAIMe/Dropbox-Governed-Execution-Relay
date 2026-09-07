@@ -40,7 +40,7 @@ def main() -> int:
     readme = (ROOT / "README.md").read_text("utf-8")
     for token in ("GEN4_PEER_CONTRACTS_UNAVAILABLE", "invocation-time", "PRE_AHC_EXECUTE_WAL", "ACTIVATED.json"):
         if token not in protocol: fail(f"PROTOCOL_TOKEN:{token}")
-    for token in ("Generation 4", "EXECUTION_RELAY", "UnavailableGen4Peers", "Generation-3 installed runtime"):
+    for token in ("Generation 4", "EXECUTION_RELAY", "UnavailableGen4Peers", "Generation-3 runtime to remain installed"):
         if token not in profile: fail(f"PROFILE_TOKEN:{token}")
     for token in ("Generation 4", "pre-activation", "Gen4 activation"):
         if token not in binding: fail(f"BINDING_TOKEN:{token}")
