@@ -14,7 +14,7 @@ for name in (
     "test_relay_v1_core", "test_relay_v1_safety", "test_relay_v1_safety_more",
     "test_relay_v1_transport_recovery", "test_review_corrections", "test_gtg_http", "test_gen4",
     "test_gen4_provider_evidence", "test_gen4_delegation", "test_gen4_gep14_correlation",
-    "test_gen4_chm_relay_contract",
+    "test_gen4_chm_relay_contract", "test_gen4_runtime_peers",
 ):
     suite.addTests(unittest.defaultTestLoader.loadTestsFromName(name))
 
