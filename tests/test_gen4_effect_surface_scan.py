@@ -66,6 +66,33 @@ class ExecutionSurfaceScannerTests(unittest.TestCase):
         self.assertIn("import:subprocess", targets)
         self.assertIn("import:subprocess.*", targets)
 
+    def test_assigned_subprocess_callable_alias_is_detected_at_call_site(self):
+        process, _ = self._scan({
+            "src/dger/rogue.py": (
+                "import subprocess\n"
+                "runner = subprocess.run\n"
+                "runner(['/bin/echo', 'x'])\n"
+            )
+        })
+        self.assertIn(
+            ("src/dger/rogue.py", "<module>", "subprocess.run", 3),
+            process,
+        )
+
+    def test_imported_callable_reassignment_and_chain_are_detected_at_call_site(self):
+        process, _ = self._scan({
+            "src/dger/rogue.py": (
+                "from subprocess import run\n"
+                "runner = run\n"
+                "runner2 = runner\n"
+                "runner2(['/bin/echo', 'x'])\n"
+            )
+        })
+        self.assertIn(
+            ("src/dger/rogue.py", "<module>", "subprocess.run", 4),
+            process,
+        )
+
     def test_direct_process_start_in_runtime_adapter_is_detected(self):
         process, _ = self._scan({
             "src/dger/gen4_runtime_peers.py": "import os\ndef bad():\n    os.system('x')\n"

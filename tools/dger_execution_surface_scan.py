@@ -49,6 +49,17 @@ def _import_aliases(tree: ast.AST) -> dict[str, set[str]]:
     return aliases
 
 
+def _assignment_names(node: ast.AST) -> list[str]:
+    if isinstance(node, ast.Name):
+        return [node.id]
+    if isinstance(node, (ast.Tuple, ast.List)):
+        out: list[str] = []
+        for item in node.elts:
+            out.extend(_assignment_names(item))
+        return out
+    return []
+
+
 def _resolve_value_targets(node: ast.AST, aliases: dict[str, set[str]]) -> set[str]:
     if isinstance(node, ast.Name):
         return aliases.get(node.id, {node.id})
@@ -79,6 +90,44 @@ def _resolve_value_targets(node: ast.AST, aliases: dict[str, set[str]]) -> set[s
     if not mapped:
         return {raw}
     return {base + (dot + tail if dot else "") for base in mapped}
+
+
+def _symbol_aliases(tree: ast.AST) -> dict[str, set[str]]:
+    aliases = _import_aliases(tree)
+    assignments: list[tuple[list[str], ast.AST]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            names: list[str] = []
+            for target in node.targets:
+                names.extend(_assignment_names(target))
+            if names:
+                assignments.append((names, node.value))
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            names = _assignment_names(node.target)
+            if names:
+                assignments.append((names, node.value))
+        elif isinstance(node, ast.NamedExpr):
+            names = _assignment_names(node.target)
+            if names:
+                assignments.append((names, node.value))
+
+    # Conservative fixed point: once a symbol is known to have referenced a process
+    # callable, later rebinding never erases that fact. This intentionally favors
+    # false-positive review over an execution-surface false negative.
+    changed = True
+    while changed:
+        changed = False
+        for names, value in assignments:
+            resolved = _resolve_value_targets(value, aliases)
+            if not resolved:
+                continue
+            for name in names:
+                bucket = aliases.setdefault(name, set())
+                before = len(bucket)
+                bucket.update(resolved)
+                if len(bucket) != before:
+                    changed = True
+    return aliases
 
 
 def _expr_marker(node: ast.AST) -> str | None:
@@ -221,7 +270,7 @@ def scan_execution_call_sites(root: Path) -> tuple[list[tuple[str, str, str, int
     for path in python_files:
         rel = path.relative_to(root).as_posix()
         tree = ast.parse(path.read_text("utf-8"), filename=str(path))
-        visitor = _ExecutionCallVisitor(rel, _import_aliases(tree))
+        visitor = _ExecutionCallVisitor(rel, _symbol_aliases(tree))
         visitor.visit(tree)
         process_calls.extend(visitor.process_calls)
         semantic_calls.extend(visitor.semantic_calls)
@@ -229,4 +278,3 @@ def scan_execution_call_sites(root: Path) -> tuple[list[tuple[str, str, str, int
     if len(triples) != len(set(triples)):
         raise ValueError("DUPLICATE_SEMANTIC_EXECUTION_CALL_SITE")
     return process_calls, semantic_calls
-
